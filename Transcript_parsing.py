@@ -101,6 +101,7 @@ def extract_transcript_tokens(file_path):
                         
     return student_info, basic_credits, pd.DataFrame(courses)
 
+#절대경로가 아닌 상대경로로
 current_dir = os.path.dirname(os.path.abspath(__file__))
 file_path = os.path.join(current_dir, 'pdf.pdf')
 student_info, basic_credits, courses_df = extract_transcript_tokens(file_path)
