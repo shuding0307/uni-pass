@@ -200,7 +200,6 @@ BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$;
 
 CREATE TRIGGER trg_students_updated_at
     BEFORE UPDATE ON students
