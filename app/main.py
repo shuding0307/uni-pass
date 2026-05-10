@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.endpoints import graduation
+from app.api.endpoints import graduation, validator
 
 
 app = FastAPI(
@@ -19,6 +19,7 @@ app.add_middleware(
 )
 
 app.include_router(graduation.router)
+app.include_router(validator.router)
 
 @app.get("/")
 async def root():
