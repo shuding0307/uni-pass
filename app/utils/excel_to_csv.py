@@ -42,7 +42,7 @@ def convert_excel_to_csv():
         """
         # pandas는 0부터 시작하므로, 요청하신 번호에서 1을 뺍니다.
         # columns = [1, 2, 3, 4, 6, 7, 8, 9, 10, 11] -> [0, 1, 2, 3, 5, 6, 7, 8, 9, 10]
-        selected_indices = [0, 1, 2, 3, 5, 6, 7, 8, 9, 10]
+        selected_indices = [1,2, 3, 4, 5, 6, 13]
         
         # 실제 존재하는 컬럼 개수 확인 후 선택
         df_selected = df.iloc[:, selected_indices]
