@@ -101,19 +101,24 @@ def extract_transcript_tokens(file_path):
                         
     return student_info, basic_credits, pd.DataFrame(courses)
 
-#절대경로가 아닌 상대경로로
-current_dir = os.path.dirname(os.path.abspath(__file__))
-file_path = os.path.join(current_dir, 'pdf.pdf')
-student_info, basic_credits, courses_df = extract_transcript_tokens(file_path)
-
-print("===== 학생 기본 정보 =====")
-for k, v in student_info.items():
-    print(f"{k}: {v}")
+if __name__ == "__main__":
+    #절대경로가 아닌 상대경로로
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(current_dir, 'pdf.pdf')
     
-print("\n===== 기본 이수 학점 =====")
-for k, v in basic_credits.items():
-    print(f"{k}: {v}학점")
+    if os.path.exists(file_path):
+        student_info, basic_credits, courses_df = extract_transcript_tokens(file_path)
 
-print("\n===== 이수 과목 목록 =====")
-pd.set_option('display.max_rows', None)
-print(courses_df)
+        print("===== 학생 기본 정보 =====")
+        for k, v in student_info.items():
+            print(f"{k}: {v}")
+            
+        print("\n===== 기본 이수 학점 =====")
+        for k, v in basic_credits.items():
+            print(f"{k}: {v}학점")
+
+        print("\n===== 이수 과목 목록 =====")
+        pd.set_option('display.max_rows', None)
+        print(courses_df)
+    else:
+        print(f"파일을 찾을 수 없습니다: {file_path}")
