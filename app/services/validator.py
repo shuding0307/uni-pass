@@ -21,20 +21,19 @@ class GraduationValidator:
         fail_grades = {"F", "NP", "U", "FA"}
         passed_courses = [c for c in self.transcript.taken_courses if c.grade not in fail_grades]
         
+        # [시뮬레이션 추가] 계획 중인 과목들도 분석 대상에 포함
+        planned_courses = getattr(self.transcript, 'planned_courses', [])
+        
         # 전공 과목 코드 세트 (검색 최적화)
         major_codes = set(getattr(self.req, 'major_course_codes', []))
 
+        # 기이수 과목 처리
         for course in passed_courses:
-            area = course.area_type
-            # 타 학과 수업이라도 과목코드가 같으면 전공으로 인정
-            if course.course_code in major_codes:
-                if area not in ["전공필수", "전공선택"]:
-                    area = "전공선택"
-
-            if area in self.buckets:
-                self.buckets[area] += course.credits
-            else:
-                self.buckets["자유선택"] += course.credits
+            self._pour_into_bucket(course, major_codes)
+            
+        # 계획 과목 처리 (성적은 없으므로 무조건 통과로 간주)
+        for course in planned_courses:
+            self._pour_into_bucket(course, major_codes)
 
         # 2. 전공 폭포수 로직 (전필 -> 전선 -> 심화전공)
         if self.buckets["전공필수"] > self.req.major_base.최소전공_필수:
@@ -48,105 +47,117 @@ class GraduationValidator:
             self.buckets["심화전공"] += overflow
 
         # 3. 교양 초과 학점 처리 (2014학번 이후 기준)
-        # 규칙: 
-        #   1. 영역별 목표 학점 초과분은 '자유선택'으로 인정
-        #   2. 단, '영역별 목표 + 10학점'을 초과하는 학점은 졸업 학점 미포함 (증발)
-        ge_areas = ["기초교양", "균형교양"]
         ge_requirements = {
             "기초교양": self.req.general_education.기초교양,
             "균형교양": self.req.general_education.균형교양
         }
 
-        for area in ge_areas:
+        for area in ["기초교양", "균형교양"]:
             required = ge_requirements[area]
             taken = self.buckets[area]
             
             if taken > required:
                 excess = taken - required
-                # 최대 +10학점까지만 자선으로 인정 가능
                 to_free_choice = min(excess, 10)
-                vaporized = excess - to_free_choice
-                
                 # 바구니 조정
                 self.buckets[area] = required
                 self.buckets["자유선택"] += to_free_choice
-                
-                if vaporized > 0:
-                    print(f"[{area}] 인정 범위(+10)를 초과한 {vaporized}학점이 졸업 학점에서 제외(증발)되었습니다.")
 
-        # 4. 부족한 학점 계산
+        # 4. 전체 영역별 부족 학점 계산
+        # 전공 영역
         if self.buckets["전공필수"] < self.req.major_base.최소전공_필수:
             self.deficiency_map["전공필수"] = self.req.major_base.최소전공_필수 - self.buckets["전공필수"]
         
-        # 5. 세부 룰(꿈 설계, 기초교양) 검사 실행
-        self._check_special_requirements()
+        if self.buckets["전공선택"] < self.req.major_base.최소전공_선택:
+            self.deficiency_map["전공선택"] = self.req.major_base.최소전공_선택 - self.buckets["전공선택"]
+            
+        primary_track = self.req.tracks.get("기본전공")
+        if primary_track and self.buckets["심화전공"] < primary_track.심화전공:
+            self.deficiency_map["심화전공"] = primary_track.심화전공 - self.buckets["심화전공"]
 
-        # 총 학점(130) 계산
+        # 교양 영역
+        if self.buckets["기초교양"] < self.req.general_education.기초교양:
+            self.deficiency_map["기초교양"] = self.req.general_education.기초교양 - self.buckets["기초교양"]
+            
+        if self.buckets["균형교양"] < self.req.general_education.균형교양:
+            self.deficiency_map["균형교양"] = self.req.general_education.균형교양 - self.buckets["균형교양"]
+
+        # 5. 세부 마이크로 룰 (교양 필수 영역 등) 검사
+        self._check_detailed_requirements(passed_courses)
+
+        # 총 학점 계산
         total_valid_credits = sum(self.buckets.values())
         if total_valid_credits < self.req.total_credits:
             self.deficiency_map["총학점"] = self.req.total_credits - total_valid_credits
+
+        # [학습 부하 관리] 이번 학기 계획 학점 분석
+        planned_credits = sum(c.credits for c in planned_courses)
+        load_message = "적절한 수강 계획입니다."
+        if planned_credits >= 22:
+            load_message = "⚠️ 과도한 학점입니다! 학습 부하가 매우 높을 것으로 예상됩니다."
+        elif planned_credits >= 19:
+            load_message = "조금 빡빡한 일정입니다. 건강 관리에 유의하세요!"
 
         return {
             "is_graduatable": len(self.deficiency_map) == 0,
             "buckets_status": self.buckets,
             "deficiency_map": self.deficiency_map,
-            "total_valid_credits": total_valid_credits
+            "total_valid_credits": total_valid_credits,
+            "simulation_load": {
+                "planned_credits": planned_credits,
+                "message": load_message
+            }
         }
     
-    
-    def _check_special_requirements(self):
-        """특정 필수 과목(꿈-설계, 기초교양 영역) 이수 여부를 핀셋 검사합니다."""
-        # F학점을 제외한 유효한 이수 과목들만 모아둠
-        # F학점(Fail), NP(Non-Pass), U(Unsatisfactory - 실격) 등 학점이 안 나오는 성적을 모두 블랙리스트 처리!
-        fail_grades = {"F", "NP", "U", "FA"} # (FA는 출석 미달 F를 뜻하는 학교도 있어서 추가해두면 좋습니다)
-        passed_courses = [c for c in self.transcript.taken_courses if c.grade not in fail_grades]
+    def _pour_into_bucket(self, course, major_codes):
+        """과목을 적절한 바구니에 담습니다."""
+        area = course.area_type
+        # 타 학과 수업이라도 과목코드가 같으면 전공으로 인정
+        if course.course_code in major_codes:
+            if area not in ["전공필수", "전공선택"]:
+                area = "전공선택"
+
+        if area in self.buckets:
+            self.buckets[area] += course.credits
+        else:
+            self.buckets["자유선택"] += course.credits
+
+    def _check_detailed_requirements(self, passed_courses):
+        """특정 필수 영역의 학점 및 이수 여부를 정밀 검사합니다."""
         taken_course_names = [c.name for c in passed_courses]
 
-        # ---------------------------------------------------------
-        # 1. 꿈-설계 룰 (2과목 이상 이수)
-        # ---------------------------------------------------------
-        dream_courses_count = sum(1 for name in taken_course_names if "꿈-설계" in name)
-        
-        if dream_courses_count < 2:
-            # 2과목을 못 채웠으면 부족한 항목에 추가!
-            self.deficiency_map["필수_꿈설계"] = f"2과목 이상 이수 필요 (현재 {dream_courses_count}과목 이수)"
+        # 1. 꿈-설계 (2과목 이상)
+        dream_count = sum(1 for name in taken_course_names if "꿈-설계" in name)
+        if dream_count < 2:
+            self.deficiency_map["필수_꿈설계"] = 2 - dream_count
 
-        # ---------------------------------------------------------
-        # 2. 기초교양 필수 4대 영역 룰
-        # ---------------------------------------------------------
-        # 나중에는 DB에서 영역 코드로 매핑하면 좋지만, 
-        # 당장 MVP 버전에서는 '과목명 키워드'로 빠르고 확실하게 잡아냅니다.
-        gen_ed_required_categories = {
-            "사고와표현": ["창의적글쓰기", "학술적글쓰기", "사고와표현"], 
-            "글로벌의사소통": ["기본영어", "고급영어", "글로벌의사소통"], 
-            "디지털리터러시": ["컴퓨팅사고력", "파이썬", "인공지능", "디지털리터러시"], 
-            "지속가능성": ["지속가능발전"] 
+        # 2. 기초교양 4대 영역 (사고 3, 글로벌 6, 디지털 6, 지속가능 2)
+        # ※ 실제 학점표에 기초교양 총점이 17인 경우 등을 고려하여 목표값 설정
+        basic_ge_rules = {
+            "사고와표현": {"keywords": ["창의적글쓰기", "학술적글쓰기", "대학글쓰기", "사고와표현"], "target": 3},
+            "글로벌의사소통": {"keywords": ["영어", "외국어", "글로벌의사소통"], "target": 6},
+            "디지털리터러시": {"keywords": ["컴퓨팅", "파이썬", "인공지능", "디지털리터러시"], "target": 6},
+            "지속가능성": {"keywords": ["지속가능발전"], "target": 2}
         }
 
-        for category, keywords in gen_ed_required_categories.items():
-            # 학생이 들은 전체 과목 이름 중에, 해당 카테고리의 키워드가 하나라도 포함되어 있는지 검사
-            has_taken_category = any(
-                any(keyword.replace(" ", "") in name.replace(" ", "") for keyword in keywords)
-                for name in taken_course_names
+        for area, rule in basic_ge_rules.items():
+            # 해당 영역 과목들의 학점 합계 계산
+            area_credits = sum(
+                c.credits for c in passed_courses
+                if any(k in c.name for k in rule["keywords"])
             )
-            
-            if not has_taken_category:
-                self.deficiency_map[f"기초교양_{category}"] = "필수 영역 미이수"
+            if area_credits < rule["target"]:
+                self.deficiency_map[f"기초교양_{area}"] = rule["target"] - area_credits
 
-        # ---------------------------------------------------------
-        # 3. 균형교양 4개 부문 필수 이수 룰 (2022학번 이후만 적용!)
-        # ---------------------------------------------------------
-
+        # 3. 균형교양 4개 부문 (각 1과목 이상 필수, 2022학번 이후)
         if self.transcript.admission_year >= 2022:
-            required_balanced_areas = ["인간과문화", "사회와세계", "자연과기술", "예술과건강"]
-            
-            # TODO: 파싱/프론트 담당자에게 API 스펙에 'sub_area' 추가해 달라고 요청 완료하기!
-            # sub_area 값이 존재하는 균형교양 과목의 부문만 띄어쓰기 없애서 수집
-            taken_balanced_areas = [
-                c.sub_area.replace(" ", "") for c in passed_courses 
-                if c.area_type == "균형교양" and getattr(c, 'sub_area', None)
-            ]
-            
-            for area in required_balanced_areas:
-                if area not in taken_balanced_areas:
-                    self.deficiency_map[f"균형교양_{area}"] = "필수 부문 미이수"
+            balanced_areas = ["인간과문화", "사회와세계", "자연과기술", "예술과건강"]
+            # sub_area 또는 이름을 통해 부문 판별
+            for area in balanced_areas:
+                has_taken = any(
+                    (c.sub_area and area in c.sub_area.replace(" ", "")) or (area[:2] in c.name)
+                    for c in passed_courses if "균형" in c.area_type
+                )
+                if not has_taken:
+                    # 부문은 과목 수 기준이므로 '1'로 표시 (미이수 1개 부문)
+                    self.deficiency_map[f"균형교양_{area}"] = 1
