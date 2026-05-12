@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.models.transcript import StudentTranscript, PlannedCourse
+from app.models.transcript import ParsedTranscriptResponse, StudentTranscript, PlannedCourse, TakenCourse
 from app.models.graduation import GraduationRequirement
 from app.services.validator import GraduationValidator
 from app.services.recommender import RecommenderService
@@ -84,40 +84,49 @@ async def parse_timetable(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"시간표 분석 중 오류 발생: {str(e)}")
 
-@router.post("/api/transcript/parse")
-async def parse_transcript(file: UploadFile = File(...)):
+@router.post("/api/transcript/parse", response_model=ParsedTranscriptResponse)
+async def parse_transcript(file: UploadFile = File(...)) -> ParsedTranscriptResponse:
     """
     [성적표 PDF 전용 파서]
     성적표 PDF 파일로부터 학번, 소속 학과, 기본 이수 요건 표 및 전체 기이수 과목 내역을 추출합니다.
     """
-    if not file.filename.endswith(".pdf"):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="PDF 파일만 업로드 가능합니다.")
 
+    tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             shutil.copyfileobj(file.file, tmp)
             tmp_path = tmp.name
 
-        # 성적표 정밀 파싱 실행
         student_info, basic_credits, courses_df = extract_transcript_tokens(tmp_path)
-        os.unlink(tmp_path)
 
         taken_courses = []
         for _, row in courses_df.iterrows():
-            taken_courses.append({
-                "course_code": str(row["과목코드"]),
-                "name": row["교과목명"],
-                "credits": int(row["학점"]),
-                "grade": row["성적"],
-                "area_type": row["이수구분"] 
-            })
+            taken_courses.append(
+                TakenCourse(
+                    course_code=str(row["과목코드"]),
+                    name=str(row["교과목명"]),
+                    credits=int(row["학점"]),
+                    grade=str(row["성적"]),
+                    area_type=str(row.get("이수구분", "미분류")),
+                )
+            )
 
-        return {
-            "student_id": student_info["학번"],
-            "department": student_info["소속"],
-            "admission_year": int(student_info["학번"][:4]) if student_info["학번"] else 2023,
-            "taken_courses": taken_courses,
-            "basic_credits": basic_credits
-        }
+        student_id = student_info.get("학번")
+        total_earned_credits = student_info.get("총취득학점")
+
+        return ParsedTranscriptResponse(
+            student_id=student_id,
+            department=student_info.get("소속"),
+            admission_year=int(student_id[:4]) if student_id else None,
+            total_earned_credits=int(total_earned_credits) if total_earned_credits else None,
+            basic_credits=basic_credits,
+            taken_courses=taken_courses,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"성적표 분석 중 오류 발생: {str(e)}")
+    finally:
+        await file.close()
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
