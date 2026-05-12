@@ -28,9 +28,10 @@ def test_transcript_parsing_e2e():
     print("\n[1] 학생 기본 정보 검증")
     assert isinstance(student_info, dict)
     assert student_info["학번"] is not None, "학번 파싱 실패"
+    assert student_info["이름"] is not None, "이름 파싱 실패"
     assert len(student_info["학번"]) >= 9, f"학번 형식이 올바르지 않음: {student_info['학번']}"
     assert student_info["총취득학점"] is not None, "총취득학점 파싱 실패"
-    print(f"✅ 학번: {student_info['학번']}, 총취득학점: {student_info['총취득학점']}")
+    print(f"✅ 학번: {student_info['학번']}, 이름: {student_info['이름']}, 총취득학점: {student_info['총취득학점']}")
     
     # 4. 기본 이수 학점 표 검증
     print("\n[2] 기본 이수 학점 표 검증")

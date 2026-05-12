@@ -4,7 +4,7 @@ import pandas as pd
 import re
 
 def extract_transcript_tokens(file_path):
-    student_info = {"학번": None, "소속": None, "총취득학점": None}
+    student_info = {"학번": None, "이름": None, "소속": None, "총취득학점": None}
     basic_credits = {}
     courses = []
     
@@ -16,17 +16,30 @@ def extract_transcript_tokens(file_path):
         # 1. 학생 정보 추출 (정규식 기반)
         # 예: "202111109 이주혁 남자 2002.06.02 IT대학 컴퓨터공학과"
         # 소속(학과) 정보를 정확히 뽑기 위해 '대학', '학부' 키워드 활용
-        student_match = re.search(r'(\d{9})\s+[가-힣]+\s+[남여]\w*\s+[\d\.]+\s+([가-힣\·\s]+(?:대학|학부)\s+[가-힣\·\s]+(?:학과|학부|전공))', text)
+        student_match = re.search(r'(\d{9})\s+([가-힣]+)\s+[남여]\w*\s+[\d\.]+\s+([가-힣\·\s]+(?:대학|학부)\s+[가-힣\·\s]+(?:학과|학부|전공))', text)
         if student_match:
             student_info["학번"] = student_match.group(1)
-            student_info["소속"] = student_match.group(2).strip()
+            student_info["이름"] = student_match.group(2)
+            student_info["소속"] = student_match.group(3).strip()
         else:
             # 보조 매칭: 학번 9자리만 찾기
             id_match = re.search(r'20\d{7}', text)
             if id_match: student_info["학번"] = id_match.group(0)
+            
+            # 보조 매칭: 이름 찾기 (학번 뒤에 나오는 한글 2~4자)
+            if student_info["학번"]:
+                name_match = re.search(rf'{student_info["학번"]}\s+([가-힣]{{2,4}})', text)
+                if name_match: student_info["이름"] = name_match.group(1)
+
             # 보조 매칭: 학과명만 찾기
             dept_match = re.search(r'[가-힣\·\s]+대학\s+[가-힣\·\s]+(?:학과|학부|전공)', text)
             if dept_match: student_info["소속"] = dept_match.group(0).strip()
+
+        # 총취득학점 추출
+        # 예: "총취득학점 : 130", "취득학점합계 120.0"
+        earned_match = re.search(r'(?:총취득학점|취득학점\s*합계)\s*[:\s]*(\d+(?:\.\d)?)', text)
+        if earned_match:
+            student_info["총취득학점"] = int(float(earned_match.group(1)))
 
         # 2. 과목 데이터 추출 및 기본 이수 학점 파싱
         # 기본 이수 학점 표 파싱 (성적표 하단)
@@ -88,4 +101,9 @@ def extract_transcript_tokens(file_path):
                     })
                     seen_codes.add(code)
 
-    return student_info, basic_credits, pd.DataFrame(courses)
+    # 총취득학점 보완 (추출 실패 시 합산)
+    courses_df = pd.DataFrame(courses)
+    if not student_info["총취득학점"] and not courses_df.empty:
+        student_info["총취득학점"] = int(courses_df["학점"].sum())
+
+    return student_info, basic_credits, courses_df
