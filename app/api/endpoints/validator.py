@@ -126,7 +126,7 @@ async def parse_transcript(file: UploadFile = File(...)) -> ParsedTranscriptResp
         return ParsedTranscriptResponse(
             student_name = student_info.get("이름"),
             student_id=str(student_id) if student_id else None,
-            department=student_info.get("소속"),
+            department=student_info.get("department"),
             admission_year=admission_year,
             total_earned_credits=int(total_earned_credits) if total_earned_credits is not None else None,
             basic_credits=basic_credits,

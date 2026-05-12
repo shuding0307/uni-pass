@@ -4,7 +4,7 @@ import pandas as pd
 import re
 
 def extract_transcript_tokens(file_path):
-    student_info = {"학번": None, "이름": None, "소속": None, "총취득학점": None}
+    student_info = {"학번": None, "이름": None, "department": None, "총취득학점": None}
     basic_credits = {}
     courses = []
     
@@ -26,7 +26,7 @@ def extract_transcript_tokens(file_path):
             if student_match:
                 student_info["학번"] = student_match.group(1)
                 student_info["이름"] = student_match.group(2)
-                student_info["소속"] = student_match.group(3).strip()
+                student_info["department"] = student_match.group(3).strip()
             else:
                 # 보조 매칭: 학번 9자리만 찾기
                 id_match = re.search(r'20\d{7}', text)
@@ -39,7 +39,7 @@ def extract_transcript_tokens(file_path):
 
                 # 보조 매칭: 학과명만 찾기
                 dept_match = re.search(r'[가-힣\·\s]+대학\s+[가-힣\·\s]+(?:학과|학부|전공)', text)
-                if dept_match: student_info["소속"] = dept_match.group(0).strip()
+                if dept_match: student_info["department"] = dept_match.group(0).strip()
 
             # 총취득학점 추출
             # 예: "총취득학점 : 130", "취득학점합계 120.0"
