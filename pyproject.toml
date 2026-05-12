@@ -1,0 +1,28 @@
+[project]
+name = "uni-pass"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.136.1",
+    "openai>=2.32.0",
+    "pdfplumber>=0.11.9",
+    "playwright>=1.58.0",
+    "pydantic>=2.13.3",
+    "python-dotenv>=1.2.2",
+    "requests>=2.33.1",
+    "uvicorn>=0.46.0",
+    "pandas>=2.2.0",
+    "sqlalchemy>=2.0.49",
+    "psycopg2-binary>=2.9.12",
+    "python-multipart>=0.0.28",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
