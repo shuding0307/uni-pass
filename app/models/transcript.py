@@ -23,9 +23,10 @@ class StudentTranscript(BaseModel):
     planned_courses: List[PlannedCourse] = Field(default_factory=list, description="현재 수강 중이거나 계획 중인 과목들")
 
 class ParsedTranscriptResponse(BaseModel):
-    student_id: Optional[str] = Field(default=None, description="성적표에서 추출한 학번")
-    department: Optional[str] = Field(default=None, description="성적표에서 추출한 소속")
-    admission_year: Optional[int] = Field(default=None, description="학번 기준 입학년도")
-    total_earned_credits: Optional[int] = Field(default=None, description="총취득학점")
+    student_id: int = Field(default=None, description="성적표에서 추출한 학번")
+    student_name: str = Field(..., description="성적표에서 추출한 이름")
+    department: str = Field(default=None, description="성적표에서 추출한 학과")
+    admission_year: int = Field(default=None, description="학번 기준 입학년도")
+    total_earned_credits: int = Field(default=None, description="총취득학점")
     basic_credits: Dict[str, str] = Field(default_factory=dict, description="성적표 하단 기본 이수 학점")
     taken_courses: List[TakenCourse] = Field(default_factory=list, description="성적표에서 추출한 기이수 과목")
