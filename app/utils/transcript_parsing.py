@@ -16,17 +16,25 @@ def extract_transcript_tokens(file_path):
         # 1. 학생 정보 추출 (정규식 기반)
         # 예: "202111109 이주혁 남자 2002.06.02 IT대학 컴퓨터공학과"
         # 소속(학과) 정보를 정확히 뽑기 위해 '대학', '학부' 키워드 활용
-        student_match = re.search(r'(\d{9})\s+[가-힣]+\s+[남여]\w*\s+[\d\.]+\s+([가-힣\·\s]+(?:대학|학부)\s+[가-힣\·\s]+(?:학과|학부|전공))', text)
+        student_match = re.search(
+            r'(\d{9})\s+[가-힣]+\s+[남여]\w*\s+[\d\.]+\s+'
+            r'([A-Za-z가-힣\·\s]+(?:대학|학부)\s+[A-Za-z가-힣\·\s]+(?:학과|학부|전공))'
+            r'\s+[\d\.]+\s+(\d+)\s+(\d+)',
+            text
+        )
         if student_match:
             student_info["학번"] = student_match.group(1)
             student_info["소속"] = student_match.group(2).strip()
+            student_info["총취득학점"] = student_match.group(4)
         else:
             # 보조 매칭: 학번 9자리만 찾기
             id_match = re.search(r'20\d{7}', text)
             if id_match: student_info["학번"] = id_match.group(0)
             # 보조 매칭: 학과명만 찾기
-            dept_match = re.search(r'[가-힣\·\s]+대학\s+[가-힣\·\s]+(?:학과|학부|전공)', text)
+            dept_match = re.search(r'[A-Za-z가-힣\·\s]+대학\s+[A-Za-z가-힣\·\s]+(?:학과|학부|전공)', text)
             if dept_match: student_info["소속"] = dept_match.group(0).strip()
+            credits_match = re.search(r'20\d{7}.*?\s+(\d+)\s+(\d+)\s+\d+(?:\.\d+)?\s+\d+(?:\.\d+)?', text)
+            if credits_match: student_info["총취득학점"] = credits_match.group(2)
 
         # 2. 과목 데이터 추출 및 기본 이수 학점 파싱
         # 기본 이수 학점 표 파싱 (성적표 하단)
@@ -43,7 +51,7 @@ def extract_transcript_tokens(file_path):
         
         # 이수구분 약어 -> 정식 명칭 매핑
         area_map = {
-            "기초": "기초교양", "균형": "균형교양", "특화": "특화교양", "대교": "대학핵심", 
+            "기초": "기초교양", "균형": "균형교양", "특화": "특화교양", "대교": "대교", 
             "전필": "전공필수", "전선": "전공선택", "심화": "심화전공", "자선": "자유선택", 
             "일선": "일반선택", "교직": "교직", "학문": "학문기초"
         }
@@ -58,7 +66,7 @@ def extract_transcript_tokens(file_path):
             r'(?:[원재MD]\s+)*'                                           # 부가 태그 (원격, 재수강 등)
             r'(\d(?:\.\d)?)\s+'                                           # 학점 (3.0 또는 3)
             r'([A-D][+0]|F|P|NP|가|부)\s+'                                # 성적
-            r'(\d{4}[\.-][12a-d])',                                        # 학기 (2021.1 또는 2021-1)
+            r'(\d{4}[\.-][1-4][a-d]?)',                                    # 학기 (2021.1, 2021-1, 2025-4a)
             re.MULTILINE
         )
 

@@ -8,7 +8,8 @@ class GraduationValidator:
         # 학점을 담을 바구니 초기화
         self.buckets = {
             "전공필수": 0, "전공선택": 0, "심화전공": 0, 
-            "기초교양": 0, "균형교양": 0, "자유선택": 0
+            "기초교양": 0, "균형교양": 0, "학문기초": 0,
+            "특화교양": 0, "대교": 0, "자유선택": 0
         }
         self.deficiency_map = {} # 부족한 학점 기록장
 
@@ -46,22 +47,9 @@ class GraduationValidator:
             self.buckets["전공선택"] = self.req.major_base.최소전공_선택
             self.buckets["심화전공"] += overflow
 
-        # 3. 교양 초과 학점 처리 (2014학번 이후 기준)
-        ge_requirements = {
-            "기초교양": self.req.general_education.기초교양,
-            "균형교양": self.req.general_education.균형교양
-        }
-
-        for area in ["기초교양", "균형교양"]:
-            required = ge_requirements[area]
-            taken = self.buckets[area]
-            
-            if taken > required:
-                excess = taken - required
-                to_free_choice = min(excess, 10)
-                # 바구니 조정
-                self.buckets[area] = required
-                self.buckets["자유선택"] += to_free_choice
+        # 3. 교양 초과 학점 처리
+        # 2014학번 이후는 교양 초과 학점을 최대 10학점까지만 자유선택으로 인정합니다.
+        self._move_general_education_overflow()
 
         # 4. 전체 영역별 부족 학점 계산
         # 전공 영역
@@ -76,14 +64,16 @@ class GraduationValidator:
             self.deficiency_map["심화전공"] = primary_track.심화전공 - self.buckets["심화전공"]
 
         # 교양 영역
-        if self.buckets["기초교양"] < self.req.general_education.기초교양:
-            self.deficiency_map["기초교양"] = self.req.general_education.기초교양 - self.buckets["기초교양"]
-            
-        if self.buckets["균형교양"] < self.req.general_education.균형교양:
-            self.deficiency_map["균형교양"] = self.req.general_education.균형교양 - self.buckets["균형교양"]
+        for area, required in self._general_education_requirements().items():
+            if required > 0 and self.buckets[area] < required:
+                self.deficiency_map[area] = required - self.buckets[area]
+
+        ge_total = sum(self.buckets[area] for area in self._general_education_requirements())
+        if ge_total < self.req.general_education.교양계:
+            self.deficiency_map["교양계"] = self.req.general_education.교양계 - ge_total
 
         # 5. 세부 마이크로 룰 (교양 필수 영역 등) 검사
-        self._check_detailed_requirements(passed_courses)
+        self._check_detailed_requirements(passed_courses + list(planned_courses))
 
         # 총 학점 계산
         total_valid_credits = sum(self.buckets.values())
@@ -111,7 +101,8 @@ class GraduationValidator:
     
     def _pour_into_bucket(self, course, major_codes):
         """과목을 적절한 바구니에 담습니다."""
-        area = course.area_type
+        area = self._normalize_area(course.area_type)
+        area = self._adjust_area_by_admission_year(course, area)
         # 타 학과 수업이라도 과목코드가 같으면 전공으로 인정
         if course.course_code in major_codes:
             if area not in ["전공필수", "전공선택"]:
@@ -122,23 +113,92 @@ class GraduationValidator:
         else:
             self.buckets["자유선택"] += course.credits
 
+    def _adjust_area_by_admission_year(self, course, area):
+        course_code = str(course.course_code)
+
+        # 2021학년도 이전 이수학점표는 현재 학문기초로 분리되는 14번대 교과목을
+        # 대교(대학별 교양) 축으로 요구하는 경우가 있습니다.
+        if (
+            self.transcript.admission_year <= 2021
+            and self.req.general_education.대교 > 0
+            and course_code.startswith("14")
+        ):
+            return "대교"
+
+        return area
+
+    def _normalize_area(self, area):
+        area_map = {
+            "기초": "기초교양",
+            "균형": "균형교양",
+            "학문": "학문기초",
+            "특화": "특화교양",
+            "전필": "전공필수",
+            "전선": "전공선택",
+            "심화": "심화전공",
+            "자선": "자유선택",
+            "일선": "자유선택",
+            "일반선택": "자유선택",
+            "교직": "자유선택",
+            "진로": "자유선택",
+            "취업": "자유선택",
+            "창업": "자유선택",
+            "기타": "자유선택",
+        }
+        return area_map.get(area, area)
+
+    def _general_education_requirements(self):
+        return {
+            "기초교양": self.req.general_education.기초교양,
+            "균형교양": self.req.general_education.균형교양,
+            "학문기초": self.req.general_education.학문기초,
+            "특화교양": self.req.general_education.특화교양,
+            "대교": self.req.general_education.대교,
+        }
+
+    def _general_education_overflow_limit(self):
+        if self.transcript.admission_year <= 2004:
+            return None
+        if self.transcript.admission_year >= 2005:
+            return 10
+        return 0
+
+    def _move_general_education_overflow(self):
+        remaining_free_choice_limit = self._general_education_overflow_limit()
+
+        for area, required in self._general_education_requirements().items():
+            if required <= 0:
+                continue
+
+            taken = self.buckets[area]
+            if taken <= required:
+                continue
+
+            excess = taken - required
+            self.buckets[area] = required
+
+            if remaining_free_choice_limit is None:
+                self.buckets["자유선택"] += excess
+                continue
+
+            to_free_choice = min(excess, remaining_free_choice_limit)
+            self.buckets["자유선택"] += to_free_choice
+            remaining_free_choice_limit -= to_free_choice
+
     def _check_detailed_requirements(self, passed_courses):
         """특정 필수 영역의 학점 및 이수 여부를 정밀 검사합니다."""
         taken_course_names = [c.name for c in passed_courses]
 
-        # 1. 꿈-설계 (2과목 이상)
-        dream_count = sum(1 for name in taken_course_names if "꿈-설계" in name)
-        if dream_count < 2:
-            self.deficiency_map["필수_꿈설계"] = 2 - dream_count
+        # 1. 꿈-설계
+        if self.transcript.admission_year >= 2018:
+            dream_courses = [c for c in passed_courses if "꿈-설계" in c.name]
+            dream_count = len(dream_courses)
+            dream_credits = sum(c.credits for c in dream_courses)
+            if dream_count < 2 or dream_credits < 2:
+                self.deficiency_map["필수_꿈설계"] = max(2 - dream_count, 2 - dream_credits)
 
-        # 2. 기초교양 4대 영역 (사고 3, 글로벌 6, 디지털 6, 지속가능 2)
-        # ※ 실제 학점표에 기초교양 총점이 17인 경우 등을 고려하여 목표값 설정
-        basic_ge_rules = {
-            "사고와표현": {"keywords": ["창의적글쓰기", "학술적글쓰기", "대학글쓰기", "사고와표현"], "target": 3},
-            "글로벌의사소통": {"keywords": ["영어", "외국어", "글로벌의사소통"], "target": 6},
-            "디지털리터러시": {"keywords": ["컴퓨팅", "파이썬", "인공지능", "디지털리터러시"], "target": 6},
-            "지속가능성": {"keywords": ["지속가능발전"], "target": 2}
-        }
+        # 2. 입학년도별 기초교양 세부 영역
+        basic_ge_rules = self._basic_general_education_rules()
 
         for area, rule in basic_ge_rules.items():
             # 해당 영역 과목들의 학점 합계 계산
@@ -149,15 +209,53 @@ class GraduationValidator:
             if area_credits < rule["target"]:
                 self.deficiency_map[f"기초교양_{area}"] = rule["target"] - area_credits
 
-        # 3. 균형교양 4개 부문 (각 1과목 이상 필수, 2022학번 이후)
+        # 3. 균형교양 4개 부문
+        # 2021학번까지는 부문에 상관없이 균형교양 학점만 충족하면 됩니다.
+        # 2022학번부터는 4개 부문을 각각 1과목 이상 이수해야 합니다.
         if self.transcript.admission_year >= 2022:
             balanced_areas = ["인간과문화", "사회와세계", "자연과기술", "예술과건강"]
             # sub_area 또는 이름을 통해 부문 판별
             for area in balanced_areas:
                 has_taken = any(
-                    (c.sub_area and area in c.sub_area.replace(" ", "")) or (area[:2] in c.name)
+                    (getattr(c, "sub_area", None) and area in c.sub_area.replace(" ", "")) or (area[:2] in c.name)
                     for c in passed_courses if "균형" in c.area_type
                 )
                 if not has_taken:
                     # 부문은 과목 수 기준이므로 '1'로 표시 (미이수 1개 부문)
                     self.deficiency_map[f"균형교양_{area}"] = 1
+
+    def _basic_general_education_rules(self):
+        if self.transcript.admission_year <= 2021:
+            return {
+                "사고와표현": {
+                    "keywords": ["글쓰기와말하기", "창의적글쓰기", "학술적글쓰기", "대학글쓰기", "사고와표현"],
+                    "target": 3,
+                },
+                "글로벌의사소통": {
+                    "keywords": ["의사소통영어", "영어", "외국어", "글로벌의사소통"],
+                    "target": 4,
+                },
+                "디지털리터러시": {
+                    "keywords": ["컴퓨팅사고력", "컴퓨팅", "파이썬", "인공지능", "디지털리터러시"],
+                    "target": 3,
+                },
+            }
+
+        return {
+            "사고와표현": {
+                "keywords": ["글쓰기와말하기", "창의적글쓰기", "학술적글쓰기", "대학글쓰기", "사고와표현"],
+                "target": 3,
+            },
+            "글로벌의사소통": {
+                "keywords": ["의사소통영어", "영어", "외국어", "글로벌의사소통"],
+                "target": 6,
+            },
+            "디지털리터러시": {
+                "keywords": ["컴퓨팅사고력", "컴퓨팅", "파이썬", "인공지능", "디지털리터러시"],
+                "target": 6,
+            },
+            "지속가능성": {
+                "keywords": ["지속가능발전"],
+                "target": 2,
+            },
+        }
