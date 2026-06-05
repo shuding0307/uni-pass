@@ -24,7 +24,8 @@ class StudentTranscript(BaseModel):
 
 class ParsedTranscriptResponse(BaseModel):
     student_id: Optional[str] = Field(default=None, description="성적표에서 추출한 학번")
-    department: Optional[str] = Field(default=None, description="성적표에서 추출한 소속")
+    student_name: Optional[str] = Field(default=None, description="성적표에서 추출한 이름")
+    department: Optional[str] = Field(default=None, description="성적표에서 추출한 학과")
     admission_year: Optional[int] = Field(default=None, description="학번 기준 입학년도")
     total_earned_credits: Optional[int] = Field(default=None, description="총취득학점")
     basic_credits: Dict[str, str] = Field(default_factory=dict, description="성적표 하단 기본 이수 학점")
