@@ -3,7 +3,7 @@ name = "uni-pass"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.136.1",
     "openai>=2.32.0",
