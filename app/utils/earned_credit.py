@@ -149,6 +149,63 @@ def calculate_earned_credit(
     return earned_credit
 
 
+def _course_value(course: Any, key: str, default: Any = None) -> Any:
+    if isinstance(course, Mapping):
+        return course.get(key, default)
+    return getattr(course, key, default)
+
+
+def _apply_major_cascade(
+    earned_credit: Dict[str, int],
+    major_required_limit: Optional[int],
+    major_elective_limit: Optional[int],
+) -> None:
+    if major_required_limit is not None and earned_credit["major_required"] > major_required_limit:
+        overflow = earned_credit["major_required"] - major_required_limit
+        earned_credit["major_required"] = major_required_limit
+        earned_credit["major_elective"] += overflow
+
+    if major_elective_limit is not None and earned_credit["major_elective"] > major_elective_limit:
+        overflow = earned_credit["major_elective"] - major_elective_limit
+        earned_credit["major_elective"] = major_elective_limit
+        earned_credit["advanced_major"] += overflow
+
+
+def calculate_earned_credit_from_courses(
+    courses: Iterable[Any],
+    major_required_codes: Optional[set[str]] = None,
+    major_required_limit: Optional[int] = None,
+    major_elective_limit: Optional[int] = None,
+    apply_major_cascade: bool = False,
+) -> Dict[str, int]:
+    earned_credit = empty_earned_credit()
+    major_required_codes = major_required_codes or set()
+
+    for course in courses:
+        grade = str(_course_value(course, "grade", "P")).strip().upper()
+        if grade in FAIL_GRADES:
+            continue
+
+        try:
+            credits = int(float(_course_value(course, "credits", 0)))
+        except (TypeError, ValueError):
+            continue
+
+        course_code = str(_course_value(course, "course_code", "")).strip()
+        bucket = normalize_area_to_earned_bucket(_course_value(course, "area_type"))
+        if course_code in major_required_codes:
+            bucket = "major_required"
+
+        earned_credit["total"] += credits
+        if bucket:
+            earned_credit[bucket] += credits
+
+    if apply_major_cascade:
+        _apply_major_cascade(earned_credit, major_required_limit, major_elective_limit)
+
+    return earned_credit
+
+
 def build_course_catalog(courses: Iterable[Any]) -> Dict[str, Any]:
     return {
         str(getattr(course, "course_code", "")).strip(): course

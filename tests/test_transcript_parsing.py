@@ -5,8 +5,15 @@ import glob
 from app.utils.transcript_parsing import extract_transcript_tokens, _parse_transcript_text
 
 def get_test_pdf():
-    """data 폴더 내의 첫 번째 PDF 파일을 찾아 반환합니다."""
-    pdf_files = glob.glob("data/*.pdf")
+    """data 폴더 내의 성적표 PDF 파일을 찾아 반환합니다."""
+    known_transcript_pdf = "data/20260505223705446.pdf"
+    if os.path.exists(known_transcript_pdf):
+        return known_transcript_pdf
+
+    pdf_files = [
+        path for path in sorted(glob.glob("data/*.pdf"))
+        if "시간표" not in os.path.basename(path)
+    ]
     if pdf_files:
         return pdf_files[0]
     return None

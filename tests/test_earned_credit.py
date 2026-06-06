@@ -2,6 +2,7 @@ import pandas as pd
 
 from app.utils.earned_credit import (
     calculate_earned_credit,
+    calculate_earned_credit_from_courses,
     get_department_course_catalog,
     get_major_credit_rules,
     graduation_requirement_to_basic_credits,
@@ -133,6 +134,45 @@ def test_computer_science_legacy_catalog_reclassifies_free_electives():
     assert earned_credit["major_required"] == 6
     assert earned_credit["major_elective"] == 6
     assert earned_credit["free_elective"] == 1
+
+
+def test_calculate_earned_credit_from_courses_includes_planned_courses():
+    courses = [
+        {"course_code": "4471010", "name": "자료구조", "credits": 3, "grade": "B+", "area_type": "전공필수"},
+        {"course_code": "4471029", "name": "컴퓨터구조", "credits": 3, "grade": "B0", "area_type": "전공필수"},
+        *[
+            {
+                "course_code": f"TAKEN{i}",
+                "name": f"기이수전선{i}",
+                "credits": 3,
+                "grade": "A0",
+                "area_type": "전공선택",
+            }
+            for i in range(11)
+        ],
+        {"course_code": "48400025", "name": "운영체제", "credits": 3, "area_type": "전공필수"},
+        *[
+            {
+                "course_code": f"PLAN{i}",
+                "name": f"시간표전선{i}",
+                "credits": 3,
+                "area_type": "전공선택",
+            }
+            for i in range(5)
+        ],
+    ]
+
+    earned_credit = calculate_earned_credit_from_courses(
+        courses,
+        major_required_limit=9,
+        major_elective_limit=33,
+        apply_major_cascade=True,
+    )
+
+    assert earned_credit["total"] == 57
+    assert earned_credit["major_required"] == 9
+    assert earned_credit["major_elective"] == 33
+    assert earned_credit["advanced_major"] == 15
 
 
 def test_graduation_requirement_to_basic_credits_maps_2022_computer_science_shape():
