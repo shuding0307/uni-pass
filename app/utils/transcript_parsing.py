@@ -24,10 +24,69 @@ AREA_MAP = {
 
 AREA_PATTERN = "|".join(sorted(map(re.escape, AREA_MAP), key=len, reverse=True))
 
+BASIC_CREDIT_DEFAULTS = {
+    "total": 0,
+    "basic_general": 0,
+    "balanced_general": 0,
+    "academic_foundation": 0,
+    "specialized_general": 0,
+    "university_core": 0,
+    "major_required": 0,
+    "major_elective": 0,
+    "advanced_major": 0,
+    "teaching": 0,
+    "free_elective": 0,
+}
+
+
+def _parse_basic_credits(nums):
+    basic_credits = BASIC_CREDIT_DEFAULTS.copy()
+    values = []
+    for num in nums:
+        try:
+            values.append(int(float(num)))
+        except (TypeError, ValueError):
+            values.append(0)
+
+    if not values:
+        return basic_credits
+
+    if len(values) >= 9 and values[-1] >= 100:
+        keys = [
+            "basic_general",
+            "balanced_general",
+            "specialized_general",
+            "university_core",
+            "major_required",
+            "major_elective",
+            "advanced_major",
+            "free_elective",
+        ]
+        basic_credits["total"] = values[-1]
+        for key, value in zip(keys, values[:-1]):
+            basic_credits[key] = value
+        return basic_credits
+
+    keys = [
+        "basic_general",
+        "balanced_general",
+        "specialized_general",
+        "university_core",
+        "major_required",
+        "major_elective",
+        "advanced_major",
+        "teaching",
+        "free_elective",
+        "total",
+    ]
+    for key, value in zip(keys, values):
+        basic_credits[key] = value
+    return basic_credits
+
 
 def _parse_transcript_text(text):
     student_info = {"학번": None, "이름": None, "department": None, "총취득학점": None}
-    basic_credits = {}
+    basic_credits = BASIC_CREDIT_DEFAULTS.copy()
     courses = []
 
     if not text.strip():
@@ -74,10 +133,7 @@ def _parse_transcript_text(text):
     basic_match = re.search(r'기본이수학점\s+([\d\s]+)', text)
     if basic_match:
         nums = basic_match.group(1).split()
-        cats = ["기초", "균형", "특화", "대교", "전필", "전선", "심화", "교직", "자선"]
-        for idx, cat in enumerate(cats):
-            if idx < len(nums):
-                basic_credits[cat] = nums[idx]
+        basic_credits = _parse_basic_credits(nums)
 
     seen_codes = set()
 
@@ -147,6 +203,6 @@ def extract_transcript_tokens(file_path):
     except Exception as e:
         # 파일 오픈 실패 등 예외 발생 시 빈 데이터 반환하여 상위에서 처리 유도
         student_info = {"학번": None, "이름": None, "department": None, "총취득학점": None}
-        basic_credits = {}
+        basic_credits = BASIC_CREDIT_DEFAULTS.copy()
         courses = []
         return student_info, basic_credits, pd.DataFrame(courses)

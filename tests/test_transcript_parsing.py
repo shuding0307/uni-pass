@@ -37,7 +37,10 @@ def test_transcript_parsing_e2e():
     print("\n[2] 기본 이수 학점 표 검증")
     assert isinstance(basic_credits, dict)
     # 기초, 균형, 전필, 전선 중 최소 하나는 있어야 함
-    assert any(k in basic_credits for k in ["기초", "균형", "전필", "전선"]), "기본 이수 학점 정보를 찾을 수 없습니다."
+    assert any(
+        basic_credits[k] > 0
+        for k in ["basic_general", "balanced_general", "major_required", "major_elective"]
+    ), "기본 이수 학점 정보를 찾을 수 없습니다."
     print(f"✅ 발견된 영역: {list(basic_credits.keys())}")
     
     # 5. 과목 데이터프레임 검증 (핵심)
@@ -77,7 +80,10 @@ def test_parse_transcript_text_with_it_college_and_area_aliases():
     assert student_info["이름"] == "이주혁"
     assert student_info["department"] == "IT대학 컴퓨터공학과"
     assert student_info["총취득학점"] == 9
-    assert basic_credits["전필"] == "9"
+    assert basic_credits["major_required"] == 9
+    assert basic_credits["major_elective"] == 33
+    assert basic_credits["free_elective"] == 20
+    assert basic_credits["total"] == 130
 
     assert courses_df["이수구분"].tolist() == ["기초교양", "전공필수", "전공선택"]
     assert courses_df["이수구분원문"].tolist() == ["교약", "전필", "전선"]
