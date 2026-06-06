@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from app.models.graduation import GraduationRequirement
 from app.services.parser import parse_graduation_requirements
+from app.utils.department import normalize_department_name
 import os
 
 # 라우터 생성
@@ -29,11 +30,13 @@ async def get_graduation_requirements(year: str = "2025", department: str = "컴
         if not os.path.exists(pdf_file):
              raise HTTPException(status_code=404, detail="서버에 이수학점표 PDF 파일이 존재하지 않습니다.")
 
+    normalized_department = normalize_department_name(department, default="컴퓨터공학과")
+
     # 3. 파싱 로직 실행
-    parsed_data = parse_graduation_requirements(pdf_file, target_dept=department)
+    parsed_data = parse_graduation_requirements(pdf_file, target_dept=normalized_department)
     
     # 4. 결과가 없으면 에러, 있으면 Pydantic 모델(response_model)에 맞춰 자동 반환
     if not parsed_data:
-        raise HTTPException(status_code=404, detail=f"'{department}'의 데이터를 찾거나 파싱할 수 없습니다.")
+        raise HTTPException(status_code=404, detail=f"'{normalized_department}'의 데이터를 찾거나 파싱할 수 없습니다.")
         
     return parsed_data

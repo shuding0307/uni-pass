@@ -26,6 +26,7 @@ from app.services.timetable_parser import TimetableParser
 from app.services.timetable_recommender import TimetableRecommenderService
 from app.services.validator import GraduationValidator
 from app.utils.cse_curriculum import fetch_first_available_cse_curriculum_catalog
+from app.utils.department import normalize_department_name
 from app.utils.earned_credit import (
     build_course_catalog,
     calculate_earned_credit,
@@ -50,14 +51,7 @@ def _to_int(value: Any) -> int | None:
 
 
 def _extract_requirement_department(department: str | None) -> str:
-    if not department:
-        return "컴퓨터공학과"
-
-    tokens = str(department).split()
-    for token in reversed(tokens):
-        if token.endswith(("학과", "학부", "전공")):
-            return token
-    return str(department).strip()
+    return normalize_department_name(department, default="컴퓨터공학과")
 
 
 def _load_graduation_requirement(admission_year: int | None, department: str | None) -> Dict[str, Any] | None:

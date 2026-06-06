@@ -1,7 +1,10 @@
 import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from app.models.db import Base
+
+load_dotenv()
 
 # 데이터베이스 URL (실제 운영 시에는 .env 파일에서 관리 권장)
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/unipass")

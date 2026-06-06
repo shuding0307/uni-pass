@@ -11,11 +11,13 @@ class Settings:
     OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
     # 기본 모델은 비용/속도 균형을 위해 mini 계열을 사용. .env에서 OPENAI_MODEL로 변경 가능.
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
     @property
     def llm_enabled(self) -> bool:
         """LLM 호출 가능 여부 (API 키 존재 여부)."""
-        return bool(self.OPENAI_API_KEY)
+        return bool(self.OPENAI_API_KEY or self.GEMINI_API_KEY)
 
 
 settings = Settings()
