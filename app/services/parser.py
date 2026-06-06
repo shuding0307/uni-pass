@@ -1,6 +1,7 @@
 import os
 import json
 from app.services.base_parser import BasePdfParser
+from app.utils.department import normalize_department_name
 
 
 class RequirementParser(BasePdfParser):
@@ -11,6 +12,7 @@ class RequirementParser(BasePdfParser):
 
 
 def parse_graduation_requirements(pdf_path, target_dept="컴퓨터공학과"):
+    target_dept = normalize_department_name(target_dept, default="컴퓨터공학과")
     print(f"[{os.path.basename(pdf_path)}] Y좌표 기반 정밀 윈도우 파싱 시작...\n")
     
     result = {

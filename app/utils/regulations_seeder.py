@@ -12,6 +12,7 @@ embedding(VECTOR) 컬럼은 pgvector 미설치이므로 건드리지 않는다.
 import glob
 import json
 import os
+import argparse
 from datetime import date
 
 from app.core.database import SessionLocal
@@ -120,7 +121,7 @@ def seed_from_pdfs(db, pdf_dir: str) -> int:
     return count
 
 
-def run():
+def run(skip_pdfs: bool = False):
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
     json_path = os.path.join(base_dir, "data", "regulations_seed.json")
     pdf_dir = os.path.join(base_dir, "data", "raw_requirements")
@@ -130,8 +131,12 @@ def run():
         print("=== regulations 시드 시작 ===")
         n1 = seed_from_json(db, json_path)
         print(f"  학칙 산문 JSON: {n1}건 삽입")
-        n2 = seed_from_pdfs(db, pdf_dir)
-        print(f"  졸업요건 PDF 보조 시드: {n2}건 삽입")
+        if skip_pdfs:
+            n2 = 0
+            print("  졸업요건 PDF 보조 시드: 건너뜀 (--skip-pdfs)")
+        else:
+            n2 = seed_from_pdfs(db, pdf_dir)
+            print(f"  졸업요건 PDF 보조 시드: {n2}건 삽입")
         total = n1 + n2
         print(f"  합계: {total}건 삽입 (중복 skip 포함)")
         print(f"  현재 테이블 총 행 수: {db.query(Regulation).count()}")
@@ -140,4 +145,11 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser(description="regulations 테이블 시드")
+    parser.add_argument(
+        "--skip-pdfs",
+        action="store_true",
+        help="data/regulations_seed.json만 적재하고 raw_requirements PDF 보조 시드는 건너뜁니다.",
+    )
+    args = parser.parse_args()
+    run(skip_pdfs=args.skip_pdfs)

@@ -14,6 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.services.rules import GraduationRuleSet
+from app.utils.department import normalize_department_name
 
 
 def _keywords_for(deficiency_key: str, department: Optional[str] = None) -> List[str]:
@@ -74,19 +75,21 @@ class RagService:
         if not query_terms:
             return []
 
-        # 작은따옴표·특수문자 제거 후 tsquery 토큰 조합
-        safe_terms = [re.sub(r"['\"|&!\\]", "", t).strip() for t in query_terms]
+        # plainto_tsquery에 넘길 자연어 검색어. 특수문자는 공백으로 완화한다.
+        safe_terms = [re.sub(r"['\"|&!\\:()]", " ", t).strip() for t in query_terms]
         safe_terms = [t for t in safe_terms if t]
         if not safe_terms:
             return []
 
-        ts_query = " | ".join(f"'{t}'" for t in safe_terms)
+        search_text = " ".join(safe_terms)
 
         major_filter = ""
-        params: dict = {"ts_query": ts_query, "top_k": top_k}
-        if major:
-            major_filter = "AND (r.major IS NULL OR r.major = :major)"
+        params: dict = {"search_text": search_text, "top_k": top_k}
+        normalized_major = normalize_department_name(major)
+        if normalized_major:
+            major_filter = "AND (r.major IS NULL OR r.major IN (:major, :normalized_major))"
             params["major"] = major
+            params["normalized_major"] = normalized_major
 
         # content_vector는 GENERATED 컬럼이라 ORM create_all()에서 생성되지 않으므로
         # 쿼리 시점에 to_tsvector()를 직접 계산한다 (15~100건 규모에서 성능 충분).
@@ -95,18 +98,18 @@ class RagService:
                 r.title,
                 ts_headline(
                     'simple', r.content,
-                    to_tsquery('simple', :ts_query),
+                    plainto_tsquery('simple', :search_text),
                     'MaxWords=60, MinWords=20, MaxFragments=2, StartSel=<<, StopSel=>>'
                 ) AS snippet,
                 r.source_tag,
                 ts_rank(
                     to_tsvector('simple', r.title || ' ' || r.content),
-                    to_tsquery('simple', :ts_query)
+                    plainto_tsquery('simple', :search_text)
                 ) AS rank
             FROM regulations r
             WHERE r.is_active = TRUE
               AND to_tsvector('simple', r.title || ' ' || r.content)
-                  @@ to_tsquery('simple', :ts_query)
+                  @@ plainto_tsquery('simple', :search_text)
               {major_filter}
             ORDER BY rank DESC
             LIMIT :top_k

@@ -36,6 +36,7 @@ CREATE TABLE courses (
     name            VARCHAR(200) NOT NULL,
     credits         SMALLINT     NOT NULL CHECK (credits > 0),
     area_type       VARCHAR(50)  NOT NULL,
+    sub_area        VARCHAR(100),
     building_name   VARCHAR(100),
     latitude        NUMERIC(10,7),
     longitude       NUMERIC(10,7),
