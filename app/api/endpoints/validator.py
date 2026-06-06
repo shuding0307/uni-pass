@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.models.transcript import StudentTranscript, PlannedCourse
-from app.models.graduation import GraduationRequirement
+from app.models.transcript import StudentTranscript, PlannedCourse, TakenCoursefrom app.models.graduation import GraduationRequirement
 from app.services.validator import GraduationValidator
 from app.services.recommender import RecommenderService
 from app.services.report_service import ReportService
@@ -178,16 +177,16 @@ async def parse_transcript(file: UploadFile = File(...)) -> ParsedTranscriptResp
     [성적표 PDF 전용 파서]
     성적표 PDF에서 학번, 소속 학과, 기본 이수 요건 표 및 전체 기이수 과목 내역을 추출합니다.
     """
-    if not file.filename.endswith(".pdf"):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="PDF 파일만 업로드 가능합니다.")
 
+    tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             shutil.copyfileobj(file.file, tmp)
             tmp_path = tmp.name
 
         student_info, basic_credits, courses_df = extract_transcript_tokens(tmp_path)
-        os.unlink(tmp_path)
 
         taken_courses = []
         for _, row in courses_df.iterrows():
@@ -222,3 +221,7 @@ async def parse_transcript(file: UploadFile = File(...)) -> ParsedTranscriptResp
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"성적표 분석 중 오류 발생: {str(e)}")
+    finally:
+        await file.close()
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
