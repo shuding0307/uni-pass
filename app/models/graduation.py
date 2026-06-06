@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Dict
+from typing import Dict, List
 
 class GeneralEducation(BaseModel):
     기초교양: int
@@ -24,4 +24,8 @@ class GraduationRequirement(BaseModel):
     tracks: Dict[str, TrackDetail] = Field(
         ..., 
         description="'기본전공', '복수전공', '단일부전공' 등을 키(Key)로 가지는 트랙별 학점 정보"
+    )
+    major_course_codes: List[str] = Field(
+        default_factory=list,
+        description="성적표 이수구분과 무관하게 전공으로 인정할 과목 코드 목록"
     )

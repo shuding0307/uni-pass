@@ -1,11 +1,62 @@
 import pdfplumber
 import re
+import csv
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.models.db import Course
 from typing import List, Dict
 
+
+@dataclass
+class CatalogCourse:
+    course_code: str
+    name: str
+    credits: int
+    area_type: str
+    sub_area: str | None = None
+    building_name: str | None = None
+
+
+def _parse_credits(raw: str | None) -> int:
+    if not raw:
+        return 0
+    first = str(raw).split("-")[0].strip()
+    try:
+        return int(first)
+    except ValueError:
+        return 0
+
+
+@lru_cache(maxsize=1)
+def _load_fallback_courses() -> List[CatalogCourse]:
+    base_dir = Path(__file__).resolve().parents[2]
+    csv_path = base_dir / "data" / "parsed_schedule.csv"
+    if not csv_path.exists():
+        return []
+
+    courses_by_code: dict[str, CatalogCourse] = {}
+    with csv_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
+        for row in csv.DictReader(csv_file):
+            code = (row.get("과목코드") or "").strip()
+            name = (row.get("과목명") or "").strip()
+            if not code or not name or code in courses_by_code:
+                continue
+            courses_by_code[code] = CatalogCourse(
+                course_code=code,
+                name=name.replace("\n", " "),
+                credits=_parse_credits(row.get("시수")),
+                area_type=(row.get("구분") or "미분류").strip() or "미분류",
+                sub_area=(row.get("부문") or "").strip() or None,
+                building_name=(row.get("건물") or "").strip() or None,
+            )
+    return list(courses_by_code.values())
+
+
 class TimetableParser:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | None = None):
         self.db = db
 
     def parse_pdf(self, pdf_path: str, department: str = None) -> List[Dict]:
@@ -57,7 +108,7 @@ class TimetableParser:
         cleaned_source = sanitize(text)
         if len(cleaned_source) < 2: return []
         
-        all_courses = self.db.query(Course).all()
+        all_courses = self._get_courses()
         sorted_courses = sorted(all_courses, key=lambda x: len(sanitize(x.name)), reverse=True)
         
         matched_in_block = []
@@ -110,3 +161,14 @@ class TimetableParser:
             if matches_dept(c2) and not matches_dept(c1): return c2
             
         return c1
+
+    def _get_courses(self) -> List[Course | CatalogCourse]:
+        if self.db is not None:
+            try:
+                courses = self.db.query(Course).all()
+                if courses:
+                    return courses
+            except SQLAlchemyError:
+                pass
+
+        return _load_fallback_courses()
