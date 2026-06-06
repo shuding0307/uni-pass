@@ -1,14 +1,30 @@
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
+from contextlib import redirect_stdout
+import io
+import os
+import shutil
+import tempfile
+from typing import Any, Dict, List
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+
 from app.core.database import get_db
-from app.models.transcript import EarnedCredit, ParsedTranscriptResponse, StudentTranscript, PlannedCourse, TakenCourse
-from app.models.graduation import GraduationRequirement
 from app.models.db import Course
-from app.services.validator import GraduationValidator
-from app.services.recommender import RecommenderService
-from app.services.timetable_parser import TimetableParser
+from app.models.graduation import GraduationRequirement
+from app.models.transcript import EarnedCredit, ParsedTranscriptResponse, PlannedCourse, StudentTranscript, TakenCourse
+from app.schemas.timetable import (
+    RecommendedCourse,
+    RecommendedTimetable,
+    TimetableRecommendRequest,
+    TimetableRecommendResponse,
+)
 from app.services.parser import parse_graduation_requirements
+from app.services.recommender import RecommenderService
+from app.services.report_service import ReportService
+from app.services.timetable_parser import TimetableParser
+from app.services.timetable_recommender import TimetableRecommenderService
+from app.services.validator import GraduationValidator
 from app.utils.cse_curriculum import fetch_first_available_cse_curriculum_catalog
 from app.utils.earned_credit import (
     build_course_catalog,
@@ -19,17 +35,18 @@ from app.utils.earned_credit import (
     graduation_requirement_to_basic_credits,
 )
 from app.utils.transcript_parsing import extract_transcript_tokens
-from typing import Dict, Any, List
-from contextlib import redirect_stdout
-import io
-import shutil
-import os
-import tempfile
 
-# 도메인 주도 설계(DDD)를 위해 라우터 태그와 경로를 직관적으로 변경합니다.
-router = APIRouter(
-    tags=["Academic Agent APIs (Parsers & Evaluator)"]
-)
+
+router = APIRouter(tags=["Academic Agent APIs (Parsers & Evaluator)"])
+
+
+def _to_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _extract_requirement_department(department: str | None) -> str:
@@ -124,7 +141,6 @@ def _build_taken_courses(courses_df, course_catalog: Dict[str, Any], major_requi
         area_type = matched_area_type or str(row.get("이수구분", "미분류"))
         if course_code in major_required_codes:
             area_type = "전공필수"
-        sub_area = _catalog_value(matched_course, "sub_area")
         taken_courses.append(
             TakenCourse(
                 course_code=course_code,
@@ -132,7 +148,7 @@ def _build_taken_courses(courses_df, course_catalog: Dict[str, Any], major_requi
                 credits=int(row["학점"]),
                 grade=str(row["성적"]),
                 area_type=area_type,
-                sub_area=sub_area,
+                sub_area=_catalog_value(matched_course, "sub_area"),
             )
         )
     return taken_courses
@@ -143,7 +159,7 @@ def _parse_transcript_pdf(tmp_path: str, db: Session) -> tuple[ParsedTranscriptR
 
     student_id = student_info.get("학번")
     admission_year = _extract_admission_year(student_id)
-    department = student_info.get("department")
+    department = student_info.get("department") or student_info.get("소속")
     graduation_requirement = _load_graduation_requirement(admission_year, department)
 
     course_catalog = _load_course_catalog(courses_df, db, department, admission_year, graduation_requirement)
@@ -168,7 +184,7 @@ def _parse_transcript_pdf(tmp_path: str, db: Session) -> tuple[ParsedTranscriptR
         course_catalog,
         major_credit_rules["major_required_codes"],
     )
-    total_earned_credits = student_info.get("총취득학점")
+    total_earned_credits = _to_int(student_info.get("총취득학점")) or earned_credit["total"] or None
 
     return (
         ParsedTranscriptResponse(
@@ -176,7 +192,7 @@ def _parse_transcript_pdf(tmp_path: str, db: Session) -> tuple[ParsedTranscriptR
             student_id=str(student_id) if student_id else None,
             department=department,
             admission_year=admission_year,
-            total_earned_credits=int(total_earned_credits) if total_earned_credits is not None else None,
+            total_earned_credits=total_earned_credits,
             earned_credit=earned_credit,
             basic_credits=basic_credits,
             taken_courses=taken_courses,
@@ -252,44 +268,60 @@ def _build_student_transcript(parsed_transcript: ParsedTranscriptResponse) -> St
 async def evaluate_graduation(
     transcript: StudentTranscript,
     requirement: GraduationRequirement,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     [졸업 사정 및 시뮬레이션 통합 엔진]
     기이수 성적표(taken_courses)와 계획 시간표(planned_courses)를 모두 포함한 가상 성적표를 분석하여
-    최종 졸업 가능 여부, 남은 학점 상세 분석, 학습 부하 경고, 그리고 부족 영역에 대한 맞춤형 과목 추천을 한 번에 제공합니다.
+    졸업 가능 여부, 남은 학점 분석, 학습 부하 경고, 맞춤형 과목 추천을 한 번에 제공합니다.
+    분석 결과는 DB에 영속화됩니다.
     """
     try:
-        # 1. 졸업 사정 및 시뮬레이션 분석 (Validator)
         validator = GraduationValidator(requirement, transcript)
         analysis_result = validator.analyze()
-        
-        # 2. 분석 결과의 deficiency_map을 기반으로 실시간 과목 추천 (Recommender)
+
         recommender = RecommenderService(db)
         recommendations = recommender.recommend_courses(
-            analysis_result["deficiency_map"], 
-            department=requirement.department
+            analysis_result["deficiency_map"],
+            department=requirement.department,
         )
-        
-        return {
-            "analysis": analysis_result,
-            "recommendations": recommendations
-        }
+
+        ReportService(db).save_result(
+            student_id=transcript.student_id,
+            admission_year=transcript.admission_year,
+            requirement=requirement,
+            analysis=analysis_result,
+        )
+
+        return {"analysis": analysis_result, "recommendations": recommendations}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"평가 중 오류 발생: {str(e)}")
 
+
+@router.get("/api/students/{student_id}/history")
+async def get_analysis_history(
+    student_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    [졸업 사정 이력 조회]
+    특정 학번의 과거 졸업 사정 결과를 최신순으로 반환합니다.
+    """
+    history = ReportService(db).get_history(student_id)
+    return {"student_id": student_id, "history": history}
+
+
 @router.post("/api/timetable/parse", response_model=List[PlannedCourse])
 async def parse_timetable(
     file: UploadFile = File(...),
     department: str = Form(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     [시간표 PDF 전용 파서]
-    사용자가 업로드한 K-Cloud 또는 에브리타임 시간표 PDF 파일에서 과목 코드, 명칭, 학점, 건물 정보를 추출합니다.
-    학과명(department)을 함께 전달하면 전공 과목을 더 정확하게 식별합니다.
+    K-Cloud 또는 에브리타임 시간표 PDF에서 과목 코드, 명칭, 학점, 건물 정보를 추출합니다.
     """
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="PDF 파일만 업로드 가능합니다.")
@@ -300,24 +332,76 @@ async def parse_timetable(
             shutil.copyfileobj(file.file, tmp)
             tmp_path = tmp.name
 
-        parser = TimetableParser(db)
-        matched_courses = parser.parse_pdf(tmp_path, department)
-        
-        return [
-            PlannedCourse(
-                course_code=c["course_code"],
-                name=c["name"],
-                credits=c["credits"],
-                area_type=c["area_type"],
-                building_name=c.get("building_name")
-            ) for c in matched_courses
-        ]
+        return _parse_timetable_pdf(tmp_path, db, department)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"시간표 분석 중 오류 발생: {str(e)}")
     finally:
         await file.close()
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+
+@router.post("/api/timetable/recommend", response_model=TimetableRecommendResponse)
+async def recommend_timetable(
+    req: TimetableRecommendRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    [AI 기반 시간표 추천]
+    성적표/졸업요건으로 부족 영역을 산출한 뒤, 시간 충돌이 없고 목표 학점에 맞는
+    추천 시간표 2~3안을 생성합니다. 코드가 하드 제약(충돌·학점·후보)을 보장하고,
+    LLM은 그 안에서 선택/순위와 추천 사유를 담당합니다(키 없거나 실패 시 결정론적 폴백).
+    """
+    try:
+        validator = GraduationValidator(req.requirement, req.transcript)
+        analysis = validator.analyze()
+        deficiency_map = analysis["deficiency_map"]
+
+        taken_codes = {c.course_code for c in req.transcript.taken_courses}
+
+        service = TimetableRecommenderService(db)
+        timetables, llm_used = service.recommend(
+            deficiency_map=deficiency_map,
+            department=req.requirement.department,
+            semester=req.semester,
+            taken_codes=taken_codes,
+            target_min=req.target_credits_min,
+            target_max=req.target_credits_max,
+            prefer_no_early=req.prefer_no_early,
+            optimize_walking=req.optimize_walking,
+            num_alternatives=req.num_alternatives,
+        )
+
+        return TimetableRecommendResponse(
+            deficiency_map=deficiency_map,
+            llm_used=llm_used,
+            timetables=[
+                RecommendedTimetable(
+                    total_credits=t.total_credits,
+                    covered_deficiencies=t.covered_deficiencies,
+                    rationale=t.rationale,
+                    courses=[
+                        RecommendedCourse(
+                            course_code=o.course_code,
+                            name=o.name,
+                            credits=o.credits,
+                            area_type=o.area_type,
+                            section=o.section,
+                            professor=o.professor,
+                            schedule=o.schedule,
+                            building_name=o.building_name,
+                        )
+                        for o in t.offerings
+                    ],
+                )
+                for t in timetables
+            ],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"시간표 추천 중 오류 발생: {str(e)}")
+
 
 @router.post("/api/transcript/parse", response_model=ParsedTranscriptResponse)
 async def parse_transcript(
@@ -343,7 +427,6 @@ async def parse_transcript(
             tmp_path = tmp.name
 
         parsed_transcript, graduation_requirement = _parse_transcript_pdf(tmp_path, db)
-        planned_courses = []
         if timetable_file and timetable_file.filename:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                 shutil.copyfileobj(timetable_file.file, tmp)

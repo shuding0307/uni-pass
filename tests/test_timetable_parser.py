@@ -33,13 +33,13 @@ def test_timetable_parser_falls_back_to_csv_catalog_when_db_is_unavailable():
 def test_timetable_parser_reads_uploaded_pdf_without_requiring_database():
     parser = TimetableParser(FailingSession())
 
-    matched_courses = parser.parse_pdf("data/시간표.pdf", "컴퓨터공학과")
+    matched_courses = parser.parse_pdf("test_data/kcloud.pdf", "컴퓨터공학과")
 
     assert [course["name"] for course in matched_courses] == [
-        "운영체제",
-        "생성형AI프로젝트",
+        "정밀의료와AI개론",
+        "인간관계와사랑",
         "소프트웨어공학",
-        "LLMOps파인튜닝및배포실습",
-        "데이터베이스프로그래밍",
+        "의료AI-MLOps구축및실습",
+        "컴퓨터비전",
         "캡스톤디자인",
     ]

@@ -1,6 +1,14 @@
-import pdfplumber
 import os
 import json
+from app.services.base_parser import BasePdfParser
+
+
+class RequirementParser(BasePdfParser):
+    """졸업요건 PDF에서 학과별 이수학점 정보를 추출합니다."""
+
+    def parse(self, path: str, target_dept: str = "컴퓨터공학과", **kwargs) -> dict | None:
+        return parse_graduation_requirements(path, target_dept)
+
 
 def parse_graduation_requirements(pdf_path, target_dept="컴퓨터공학과"):
     print(f"[{os.path.basename(pdf_path)}] Y좌표 기반 정밀 윈도우 파싱 시작...\n")
@@ -13,6 +21,7 @@ def parse_graduation_requirements(pdf_path, target_dept="컴퓨터공학과"):
         "tracks": {}
     }
     
+    import pdfplumber
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
@@ -22,19 +31,46 @@ def parse_graduation_requirements(pdf_path, target_dept="컴퓨터공학과"):
             for i, line in enumerate(lines):
                 if line.startswith(target_dept):
                     parts = line.split() 
+                    numeric_parts = parts[1:]
+
+                    # 이수학점표는 학년도별로 컬럼 수가 다릅니다.
+                    # 2021 양식: 학과 기초 균형 특화 대교 교양계 전필 전선 총학점
+                    # 2025 양식: 학과 기초 균형 학문기초 교양계 전필 전선 총학점
+                    if len(numeric_parts) >= 8:
+                        basic_ge = int(numeric_parts[0])
+                        balanced_ge = int(numeric_parts[1])
+                        specialized_ge = int(numeric_parts[2])
+                        univ_core_ge = int(numeric_parts[3])
+                        foundation_ge = 0
+                        ge_total = int(numeric_parts[4])
+                        major_required = int(numeric_parts[5])
+                        major_elective = int(numeric_parts[6])
+                        total_credits = int(numeric_parts[7])
+                    else:
+                        basic_ge = int(numeric_parts[0])
+                        balanced_ge = int(numeric_parts[1])
+                        specialized_ge = 0
+                        univ_core_ge = 0
+                        foundation_ge = int(numeric_parts[2])
+                        ge_total = int(numeric_parts[3])
+                        major_required = int(numeric_parts[4])
+                        major_elective = int(numeric_parts[5])
+                        total_credits = int(numeric_parts[-1])
                     
                     # 1. 메인 학점 라인
                     result["general_education"] = {
-                        "기초교양": int(parts[1]),
-                        "균형교양": int(parts[2]),
-                        "학문기초": int(parts[3]),
-                        "교양계": int(parts[4])
+                        "기초교양": basic_ge,
+                        "균형교양": balanced_ge,
+                        "학문기초": foundation_ge,
+                        "특화교양": specialized_ge,
+                        "대교": univ_core_ge,
+                        "교양계": ge_total
                     }
                     result["major_base"] = {
-                        "최소전공_필수": int(parts[5]),
-                        "최소전공_선택": int(parts[6])
+                        "최소전공_필수": major_required,
+                        "최소전공_선택": major_elective
                     }
-                    result["total_credits"] = int(parts[-1])
+                    result["total_credits"] = total_credits
                     
                     # 💡 2. 윈도우(Window) 탐색 기법 적용
                     # 컴퓨터공학과 기준 위로 4줄, 아래로 2줄(총 7줄)만 정확히 잘라냅니다.
