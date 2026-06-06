@@ -86,3 +86,58 @@ def test_ge_overflow_within_limit(base_requirement):
     assert result["buckets_status"]["기초교양"] == 17
     assert result["buckets_status"]["자유선택"] == 3
     assert result["total_valid_credits"] == 20
+
+def test_2021_basic_ge_and_balanced_area_rules_are_not_over_applied():
+    requirement = GraduationRequirement(
+        department="컴퓨터공학과",
+        total_credits=130,
+        major_base={"최소전공_필수": 0, "최소전공_선택": 0},
+        general_education={
+            "기초교양": 10,
+            "균형교양": 12,
+            "특화교양": 1,
+            "대교": 18,
+            "교양계": 41,
+        },
+        tracks={"기본전공": {"심화전공": 0, "전공계": 0, "자유선택": 89}},
+    )
+    transcript = StudentTranscript(
+        student_id="20210001",
+        admission_year=2021,
+        taken_courses=[
+            TakenCourse(course_code="1100005", name="글쓰기와말하기(자연공학)", credits=3, area_type="기초교양", grade="A+"),
+            TakenCourse(course_code="1100008", name="의사소통영어(듣기,말하기)", credits=2, area_type="기초교양", grade="A0"),
+            TakenCourse(course_code="1100009", name="의사소통영어(읽기,쓰기)", credits=2, area_type="기초교양", grade="A0"),
+            TakenCourse(course_code="1100007", name="컴퓨팅사고력(공학)", credits=3, area_type="기초교양", grade="A0"),
+            TakenCourse(course_code="1210001", name="균형1", credits=3, area_type="균형교양", grade="A0"),
+            TakenCourse(course_code="1220001", name="균형2", credits=3, area_type="균형교양", grade="A0"),
+            TakenCourse(course_code="1230001", name="균형3", credits=3, area_type="균형교양", grade="A0"),
+            TakenCourse(course_code="1240001", name="균형4", credits=3, area_type="균형교양", grade="A0"),
+            TakenCourse(course_code="1300001", name="특화", credits=1, area_type="특화교양", grade="A0"),
+            TakenCourse(course_code="1400001", name="대교1", credits=18, area_type="자유선택", grade="A0"),
+            TakenCourse(course_code="4144991", name="진로탐색과 꿈-설계", credits=1, area_type="자유선택", grade="P"),
+            TakenCourse(course_code="4471059", name="취업·창업과 꿈-설계", credits=1, area_type="전공선택", grade="P"),
+        ],
+    )
+
+    result = GraduationValidator(requirement, transcript).analyze()
+
+    assert result["buckets_status"]["대교"] == 18
+    assert "기초교양_글로벌의사소통" not in result["deficiency_map"]
+    assert "기초교양_디지털리터러시" not in result["deficiency_map"]
+    assert not any(key.startswith("균형교양_") for key in result["deficiency_map"])
+
+def test_2022_balanced_area_rules_are_applied(base_requirement):
+    transcript = StudentTranscript(
+        student_id="20220001",
+        admission_year=2022,
+        taken_courses=[
+            TakenCourse(course_code="1210001", name="문학의이해", credits=3, area_type="균형교양", grade="A0", sub_area="인간과문화"),
+            TakenCourse(course_code="1220001", name="사회의이해", credits=3, area_type="균형교양", grade="A0", sub_area="사회와세계"),
+            TakenCourse(course_code="1230001", name="과학의이해", credits=3, area_type="균형교양", grade="A0", sub_area="자연과기술"),
+        ],
+    )
+
+    result = GraduationValidator(base_requirement, transcript).analyze()
+
+    assert result["deficiency_map"]["균형교양_예술과건강"] == 1
