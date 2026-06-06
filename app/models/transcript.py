@@ -54,3 +54,4 @@ class ParsedTranscriptResponse(BaseModel):
     earned_credit: EarnedCredit = Field(default_factory=EarnedCredit, description="과목코드 매칭 기반 영역별 이수 학점")
     basic_credits: BasicCredits = Field(default_factory=BasicCredits, description="졸업 이수 요건 기준 학점")
     taken_courses: List[TakenCourse] = Field(default_factory=list, description="성적표에서 추출한 기이수 과목")
+    planned_courses: List[PlannedCourse] = Field(default_factory=list, description="시간표에서 추출한 현재 수강/계획 과목")
