@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.models.transcript import StudentTranscript, PlannedCourse, TakenCoursefrom app.models.graduation import GraduationRequirement
+from app.models.transcript import StudentTranscript, PlannedCourse, TakenCoursefrom 
+from app.models.graduation import GraduationRequirement
 from app.services.validator import GraduationValidator
 from app.services.recommender import RecommenderService
 from app.services.report_service import ReportService
