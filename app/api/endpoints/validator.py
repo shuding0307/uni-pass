@@ -15,6 +15,8 @@ from app.schemas.timetable import (
     RecommendedCourse,
 )
 from app.utils.transcript_parsing import extract_transcript_tokens
+from app.schemas.transcript import ParsedTranscriptResponse
+from app.models.transcript import TakenCourse
 from typing import Dict, Any, List
 import shutil
 import os
@@ -170,8 +172,8 @@ async def recommend_timetable(
         raise HTTPException(status_code=500, detail=f"시간표 추천 중 오류 발생: {str(e)}")
 
 
-@router.post("/api/transcript/parse")
-async def parse_transcript(file: UploadFile = File(...)):
+@router.post("/api/transcript/parse", response_model=ParsedTranscriptResponse)
+async def parse_transcript(file: UploadFile = File(...)) -> ParsedTranscriptResponse:
     """
     [성적표 PDF 전용 파서]
     성적표 PDF에서 학번, 소속 학과, 기본 이수 요건 표 및 전체 기이수 과목 내역을 추출합니다.
@@ -187,23 +189,36 @@ async def parse_transcript(file: UploadFile = File(...)):
         student_info, basic_credits, courses_df = extract_transcript_tokens(tmp_path)
         os.unlink(tmp_path)
 
-        taken_courses = [
-            {
-                "course_code": str(row["과목코드"]),
-                "name": row["교과목명"],
-                "credits": int(row["학점"]),
-                "grade": row["성적"],
-                "area_type": row["이수구분"],
-            }
-            for _, row in courses_df.iterrows()
-        ]
+        taken_courses = []
+        for _, row in courses_df.iterrows():
+            taken_courses.append(
+                TakenCourse(
+                    course_code=str(row["과목코드"]),
+                    name=str(row["교과목명"]),
+                    credits=int(row["학점"]),
+                    grade=str(row["성적"]),
+                    area_type=str(row.get("이수구분", "미분류")),
+                )
+            )
 
-        return {
-            "student_id": student_info["학번"],
-            "department": student_info["소속"],
-            "admission_year": int(student_info["학번"][:4]) if student_info["학번"] else 2023,
-            "taken_courses": taken_courses,
-            "basic_credits": basic_credits,
-        }
+        student_id = student_info.get("학번")
+        total_earned = student_info.get("총취득학점")
+
+        admission_year = None
+        if student_id and len(str(student_id)) >= 4:
+            try:
+                admission_year = int(str(student_id)[:4])
+            except (ValueError, TypeError):
+                pass
+
+        return ParsedTranscriptResponse(
+            student_name=student_info.get("이름"),
+            student_id=str(student_id) if student_id else None,
+            department=student_info.get("department") or student_info.get("소속"),
+            admission_year=admission_year,
+            total_earned_credits=int(total_earned) if total_earned is not None else None,
+            basic_credits=basic_credits,
+            taken_courses=taken_courses,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"성적표 분석 중 오류 발생: {str(e)}")
