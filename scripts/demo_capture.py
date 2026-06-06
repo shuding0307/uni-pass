@@ -204,7 +204,7 @@ def demo_timetable():
 
     print(f"PostgreSQL 과목 마스터: {course_count}개")
     print(f"PostgreSQL 개설 분반: {offering_count}개")
-    
+
     section("시간표에서 매칭된 과목")
     print_table(
         ["과목코드", "과목명", "학점", "이수구분", "건물"],

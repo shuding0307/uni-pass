@@ -2,6 +2,15 @@ import os
 import pdfplumber
 import pandas as pd
 import re
+from app.services.base_parser import BasePdfParser
+
+
+class TranscriptParser(BasePdfParser):
+    """성적표 PDF에서 학생 정보·기본이수학점·과목 내역을 추출합니다."""
+
+    def parse(self, path: str, **kwargs):
+        return extract_transcript_tokens(path)
+
 
 def extract_transcript_tokens(file_path):
     student_info = {"학번": None, "소속": None, "총취득학점": None}
@@ -11,7 +20,7 @@ def extract_transcript_tokens(file_path):
     with pdfplumber.open(file_path) as pdf:
         text = ""
         for page in pdf.pages:
-            text += page.extract_text() + "\n"
+            text += (page.extract_text() or "") + "\n"
 
         # 1. 학생 정보 추출 (정규식 기반)
         # 예: "202111109 이주혁 남자 2002.06.02 IT대학 컴퓨터공학과"

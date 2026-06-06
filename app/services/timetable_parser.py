@@ -1,46 +1,44 @@
-import pdfplumber
 import re
 from sqlalchemy.orm import Session
 from app.models.db import Course
+from app.services.base_parser import BasePdfParser
 from typing import List, Dict
 
-class TimetableParser:
+
+class TimetableParser(BasePdfParser):
     def __init__(self, db: Session):
         self.db = db
 
-    def parse_pdf(self, pdf_path: str, department: str = None) -> List[Dict]:
+    def parse(self, path: str, department: str = None, **kwargs) -> List[Dict]:
         """K-Cloud 시간표 PDF에서 표 구조를 인식하여 과목을 추출합니다."""
         matched_courses = []
         seen_codes = set()
-        
-        with pdfplumber.open(pdf_path) as pdf:
+
+        with self.open_pdf(path) as pdf:
             for page in pdf.pages:
                 # 1. 표 데이터 추출 (리스트의 리스트 형태)
                 table = page.extract_table()
                 
                 if table:
-                    # 표가 발견되면 각 칸(Cell) 단위로 텍스트를 정제하여 매칭
                     for row in table:
                         for cell in row:
-                            if not cell: continue
-                            # 한 칸 내에서 줄바꿈을 공백으로 바꾸고 매칭 시도
-                            cleaned_cell = cell.replace('\n', ' ')
-                            found = self._match_in_text(cleaned_cell, department)
+                            if not cell:
+                                continue
+                            found = self._match_in_text(cell.replace('\n', ' '), department)
                             for c in found:
                                 if c["course_code"] not in seen_codes:
                                     matched_courses.append(c)
                                     seen_codes.add(c["course_code"])
                 else:
-                    # 표 인식이 안 되는 경우를 대비한 폴백 (기존 좌표 정렬 방식)
                     words = page.extract_words()
                     sorted_words = sorted(words, key=lambda w: (round(w['top'] / 2) * 2, w['x0']))
-                    fallback_text = " ".join([w['text'] for w in sorted_words])
+                    fallback_text = " ".join(w['text'] for w in sorted_words)
                     found = self._match_in_text(fallback_text, department)
                     for c in found:
                         if c["course_code"] not in seen_codes:
                             matched_courses.append(c)
                             seen_codes.add(c["course_code"])
-                            
+
         return matched_courses
 
     def _match_in_text(self, text: str, department: str = None) -> List[Dict]:

@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 from app.models.db import Course, CourseOffering
+from app.services.rules import GraduationRuleSet
 from typing import List, Dict
 
 class RecommenderService:
@@ -45,15 +46,8 @@ class RecommenderService:
         if courses:
             return [self._format_course(c) for c in courses]
 
-        # 2. 없으면 키워드로 검색
-        category_keywords = {
-            "사고와표현": ["창의적글쓰기", "학술적글쓰기", "대학글쓰기"],
-            "글로벌의사소통": ["기본영어", "고급영어", "글로벌의사소통"],
-            "디지털리터러시": ["컴퓨팅사고력", "파이썬", "인공지능", "디지털리터러시"],
-            "지속가능성": ["지속가능발전"]
-        }
-        
-        keywords = category_keywords.get(category, [])
+        # 2. 없으면 GraduationRuleSet의 공유 키워드로 검색
+        keywords = GraduationRuleSet.CATEGORY_SEARCH_KEYWORDS.get(category, [])
         return self._find_courses_by_keywords(keywords)
 
     def _find_balanced_ge_by_area(self, area: str):

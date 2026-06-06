@@ -1,6 +1,14 @@
-import pdfplumber
 import os
 import json
+from app.services.base_parser import BasePdfParser
+
+
+class RequirementParser(BasePdfParser):
+    """졸업요건 PDF에서 학과별 이수학점 정보를 추출합니다."""
+
+    def parse(self, path: str, target_dept: str = "컴퓨터공학과", **kwargs) -> dict | None:
+        return parse_graduation_requirements(path, target_dept)
+
 
 def parse_graduation_requirements(pdf_path, target_dept="컴퓨터공학과"):
     print(f"[{os.path.basename(pdf_path)}] Y좌표 기반 정밀 윈도우 파싱 시작...\n")
@@ -13,6 +21,7 @@ def parse_graduation_requirements(pdf_path, target_dept="컴퓨터공학과"):
         "tracks": {}
     }
     
+    import pdfplumber
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
