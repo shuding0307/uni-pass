@@ -1,6 +1,21 @@
 from app.models.graduation import GraduationRequirement
 from app.models.transcript import StudentTranscript
 
+AREA_ALIASES = {
+    "기초": "기초교양",
+    "기교": "기초교양",
+    "교약": "기초교양",
+    "교필": "기초교양",
+    "균형": "균형교양",
+    "균교": "균형교양",
+    "전필": "전공필수",
+    "전선": "전공선택",
+    "심화": "심화전공",
+    "심전": "심화전공",
+    "자선": "자유선택",
+    "일선": "일반선택",
+}
+
 class GraduationValidator:
     def __init__(self, req: GraduationRequirement, transcript: StudentTranscript):
         self.req = req
@@ -111,7 +126,7 @@ class GraduationValidator:
     
     def _pour_into_bucket(self, course, major_codes):
         """과목을 적절한 바구니에 담습니다."""
-        area = course.area_type
+        area = AREA_ALIASES.get(course.area_type, course.area_type)
         # 타 학과 수업이라도 과목코드가 같으면 전공으로 인정
         if course.course_code in major_codes:
             if area not in ["전공필수", "전공선택"]:
