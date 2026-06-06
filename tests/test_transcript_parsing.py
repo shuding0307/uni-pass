@@ -2,11 +2,18 @@ import os
 import pandas as pd
 import pytest
 import glob
-from app.utils.transcript_parsing import extract_transcript_tokens
+from app.utils.transcript_parsing import extract_transcript_tokens, _parse_transcript_text
 
 def get_test_pdf():
-    """data 폴더 내의 첫 번째 PDF 파일을 찾아 반환합니다."""
-    pdf_files = glob.glob("data/*.pdf")
+    """data 폴더 내의 성적표 PDF 파일을 찾아 반환합니다."""
+    known_transcript_pdf = "data/20260505223705446.pdf"
+    if os.path.exists(known_transcript_pdf):
+        return known_transcript_pdf
+
+    pdf_files = [
+        path for path in sorted(glob.glob("data/*.pdf"))
+        if "시간표" not in os.path.basename(path)
+    ]
     if pdf_files:
         return pdf_files[0]
     return None
@@ -37,7 +44,10 @@ def test_transcript_parsing_e2e():
     print("\n[2] 기본 이수 학점 표 검증")
     assert isinstance(basic_credits, dict)
     # 기초, 균형, 전필, 전선 중 최소 하나는 있어야 함
-    assert any(k in basic_credits for k in ["기초", "균형", "전필", "전선"]), "기본 이수 학점 정보를 찾을 수 없습니다."
+    assert any(
+        basic_credits[k] > 0
+        for k in ["basic_general", "balanced_general", "major_required", "major_elective"]
+    ), "기본 이수 학점 정보를 찾을 수 없습니다."
     print(f"✅ 발견된 영역: {list(basic_credits.keys())}")
     
     # 5. 과목 데이터프레임 검증 (핵심)
@@ -58,6 +68,37 @@ def test_transcript_parsing_e2e():
     print(f"✅ 총 {len(courses_df)}개 과목 추출 성공")
     print("\n--- 상위 5개 과목 샘플 ---")
     print(courses_df.head())
+
+
+def test_parse_transcript_text_with_it_college_and_area_aliases():
+    text = """
+    성적내역
+    202111109 이주혁 남자 2002.06.02 IT대학 컴퓨터공학과
+    교약 1100005 글쓰기와말하기(자연공학) 원 3.0 A+ 2021.1
+    전필 4840003 컴퓨터프로그래밍1 3 B0 2021.2
+    전선 4840028 컴퓨터그래픽스 재 3.0 P 2022-1
+    총취득학점 : 9
+    기본이수학점 10 12 1 18 9 33 27 20 130
+    """
+
+    student_info, basic_credits, courses_df = _parse_transcript_text(text)
+
+    assert student_info["학번"] == "202111109"
+    assert student_info["이름"] == "이주혁"
+    assert student_info["department"] == "IT대학 컴퓨터공학과"
+    assert student_info["총취득학점"] == 9
+    assert basic_credits["major_required"] == 9
+    assert basic_credits["major_elective"] == 33
+    assert basic_credits["free_elective"] == 20
+    assert basic_credits["total"] == 130
+
+    assert courses_df["이수구분"].tolist() == ["기초교양", "전공필수", "전공선택"]
+    assert courses_df["이수구분원문"].tolist() == ["교약", "전필", "전선"]
+    assert courses_df["교과목명"].tolist() == [
+        "글쓰기와말하기(자연공학)",
+        "컴퓨터프로그래밍1",
+        "컴퓨터그래픽스",
+    ]
 
 if __name__ == "__main__":
     # 직접 실행 시 결과 확인

@@ -1,7 +1,14 @@
 from typing import List
+
 from app.models.graduation import GraduationRequirement
 from app.models.transcript import StudentTranscript
-from app.services.checkers import ValidationContext, RuleChecker, MajorCascadeChecker, GeOverflowChecker, DetailedGeChecker
+from app.services.checkers import (
+    DetailedGeChecker,
+    GeOverflowChecker,
+    MajorCascadeChecker,
+    RuleChecker,
+    ValidationContext,
+)
 
 
 class GraduationValidator:
@@ -9,9 +16,15 @@ class GraduationValidator:
         self.req = req
         self.transcript = transcript
         self.buckets = {
-            "전공필수": 0, "전공선택": 0, "심화전공": 0,
-            "기초교양": 0, "균형교양": 0, "학문기초": 0,
-            "특화교양": 0, "대교": 0, "자유선택": 0,
+            "전공필수": 0,
+            "전공선택": 0,
+            "심화전공": 0,
+            "기초교양": 0,
+            "균형교양": 0,
+            "학문기초": 0,
+            "특화교양": 0,
+            "대교": 0,
+            "자유선택": 0,
         }
         self.deficiency_map = {}
         self.checkers: List[RuleChecker] = [
@@ -41,14 +54,11 @@ class GraduationValidator:
             transcript=self.transcript,
         )
 
-        # Phase 1: 바구니 조정 (전공 폭포수, 교양 초과 이월)
         for checker in self.checkers[:2]:
             checker.check(ctx)
 
-        # 영역별 부족 학점 계산
         self._calculate_deficiencies()
 
-        # Phase 2: 세부 필수 룰 검사 (꿈-설계, 기초교양 세부, 균형교양 4부문)
         for checker in self.checkers[2:]:
             checker.check(ctx)
 
@@ -66,8 +76,9 @@ class GraduationValidator:
 
         return {
             "is_graduatable": len(self.deficiency_map) == 0,
-            "buckets_status": self.buckets,
             "deficiency_map": self.deficiency_map,
+            "buckets_status": self.buckets,
+            "earned_credits_by_area": self.buckets,
             "total_valid_credits": total_valid_credits,
             "simulation_load": {
                 "planned_credits": planned_credits,
@@ -116,11 +127,26 @@ class GraduationValidator:
 
     def _normalize_area(self, area: str) -> str:
         area_map = {
-            "기초": "기초교양", "균형": "균형교양", "학문": "학문기초",
-            "특화": "특화교양", "전필": "전공필수", "전선": "전공선택",
-            "심화": "심화전공", "자선": "자유선택", "일선": "자유선택",
-            "일반선택": "자유선택", "교직": "자유선택", "진로": "자유선택",
-            "취업": "자유선택", "창업": "자유선택", "기타": "자유선택",
+            "기초": "기초교양",
+            "기교": "기초교양",
+            "교약": "기초교양",
+            "교필": "기초교양",
+            "균형": "균형교양",
+            "균교": "균형교양",
+            "학문": "학문기초",
+            "특화": "특화교양",
+            "전필": "전공필수",
+            "전선": "전공선택",
+            "심화": "심화전공",
+            "심전": "심화전공",
+            "자선": "자유선택",
+            "일선": "자유선택",
+            "일반선택": "자유선택",
+            "교직": "자유선택",
+            "진로": "자유선택",
+            "취업": "자유선택",
+            "창업": "자유선택",
+            "기타": "자유선택",
         }
         return area_map.get(area, area)
 

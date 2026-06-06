@@ -1,28 +1,203 @@
-import os
-import pdfplumber
-import pandas as pd
 import re
+
+import pandas as pd
+import pdfplumber
+
 from app.services.base_parser import BasePdfParser
 
 
+AREA_MAP = {
+    "기초": "기초교양",
+    "기교": "기초교양",
+    "교약": "기초교양",
+    "교필": "기초교양",
+    "균형": "균형교양",
+    "균교": "균형교양",
+    "특화": "특화교양",
+    "특교": "특화교양",
+    "대교": "대교",
+    "전필": "전공필수",
+    "전선": "전공선택",
+    "심화": "심화전공",
+    "심전": "심화전공",
+    "자선": "자유선택",
+    "일선": "일반선택",
+    "교직": "교직",
+    "학문": "학문기초",
+}
+
+AREA_PATTERN = "|".join(sorted(map(re.escape, AREA_MAP), key=len, reverse=True))
+
+BASIC_CREDIT_DEFAULTS = {
+    "total": 0,
+    "basic_general": 0,
+    "balanced_general": 0,
+    "academic_foundation": 0,
+    "specialized_general": 0,
+    "university_core": 0,
+    "major_required": 0,
+    "major_elective": 0,
+    "advanced_major": 0,
+    "teaching": 0,
+    "free_elective": 0,
+}
+
+
 class TranscriptParser(BasePdfParser):
-    """성적표 PDF에서 학생 정보·기본이수학점·과목 내역을 추출합니다."""
+    """성적표 PDF에서 학생 정보, 기본이수학점, 과목 내역을 추출합니다."""
 
     def parse(self, path: str, **kwargs):
         return extract_transcript_tokens(path)
 
 
-def extract_transcript_tokens(file_path):
-    student_info = {
+def _empty_student_info():
+    return {
         "학번": None,
         "이름": None,
         "소속": None,
-        "department": None,  # develop 호환 키
+        "department": None,
         "총취득학점": None,
     }
-    basic_credits = {}
+
+
+def _parse_basic_credits(nums):
+    basic_credits = BASIC_CREDIT_DEFAULTS.copy()
+    values = []
+    for num in nums:
+        try:
+            values.append(int(float(num)))
+        except (TypeError, ValueError):
+            values.append(0)
+
+    if not values:
+        return basic_credits
+
+    if len(values) >= 9 and values[-1] >= 100:
+        keys = [
+            "basic_general",
+            "balanced_general",
+            "specialized_general",
+            "university_core",
+            "major_required",
+            "major_elective",
+            "advanced_major",
+            "free_elective",
+        ]
+        basic_credits["total"] = values[-1]
+        for key, value in zip(keys, values[:-1]):
+            basic_credits[key] = value
+        return basic_credits
+
+    keys = [
+        "basic_general",
+        "balanced_general",
+        "specialized_general",
+        "university_core",
+        "major_required",
+        "major_elective",
+        "advanced_major",
+        "teaching",
+        "free_elective",
+        "total",
+    ]
+    for key, value in zip(keys, values):
+        basic_credits[key] = value
+    return basic_credits
+
+
+def _parse_transcript_text(text):
+    student_info = _empty_student_info()
+    basic_credits = BASIC_CREDIT_DEFAULTS.copy()
     courses = []
 
+    if not text.strip():
+        return student_info, basic_credits, pd.DataFrame(courses)
+
+    student_match = re.search(
+        r"(\d{9})\s+([가-힣]{2,4})\s+[남여]\w*\s+[\d\.]+\s+"
+        r"([^\n]*?(?:대학|학부)\s+[^\n]*?(?:학과|학부|전공))",
+        text,
+    )
+    if student_match:
+        department = student_match.group(3).strip()
+        student_info["학번"] = student_match.group(1)
+        student_info["이름"] = student_match.group(2)
+        student_info["소속"] = department
+        student_info["department"] = department
+    else:
+        id_match = re.search(r"20\d{7}", text)
+        if id_match:
+            student_info["학번"] = id_match.group(0)
+
+        if student_info["학번"]:
+            name_match = re.search(rf'{student_info["학번"]}\s+([가-힣]{{2,4}})', text)
+            if name_match:
+                student_info["이름"] = name_match.group(1)
+
+        dept_match = re.search(r"[^\n]*?(?:대학|학부)\s+[^\n]*?(?:학과|학부|전공)", text)
+        if dept_match:
+            department = dept_match.group(0).strip()
+            student_info["소속"] = department
+            student_info["department"] = department
+
+    earned_match = re.search(r"(?:총취득학점|취득학점\s*합계)\s*[:\s]*(\d+(?:\.\d)?)", text)
+    if earned_match:
+        try:
+            student_info["총취득학점"] = int(float(earned_match.group(1)))
+        except (ValueError, TypeError):
+            pass
+
+    basic_match = re.search(r"기본이수학점\s+([\d\s]+)", text)
+    if basic_match:
+        basic_credits = _parse_basic_credits(basic_match.group(1).split())
+
+    seen_codes = set()
+    course_pattern = re.compile(
+        rf"(?<!\S)({AREA_PATTERN})\s+"
+        r"(\d{7})\s+"
+        r"(.+?)\s+"
+        r"(?:(?:원격|재수강|원|재|MD|M|D|R|N)\s+)*"
+        r"(\d+(?:\.\d)?)\s+"
+        r"([A-D][+0]|F|P|NP|가|부)\s+"
+        r"(\d{4}[\.-](?:[12]|[a-dA-D]))",
+        re.MULTILINE,
+    )
+
+    for line in text.split("\n"):
+        for match in course_pattern.finditer(line):
+            try:
+                area_code = match.group(1)
+                code = match.group(2)
+                name = re.sub(r"\s+", " ", match.group(3)).strip()
+                credits_val = int(float(match.group(4)))
+                grade = match.group(5)
+
+                if len(name) > 40:
+                    continue
+
+                if code not in seen_codes:
+                    courses.append(
+                        {
+                            "과목코드": code,
+                            "교과목명": name,
+                            "학점": credits_val,
+                            "성적": grade,
+                            "이수구분": AREA_MAP.get(area_code, area_code),
+                            "이수구분원문": area_code,
+                        }
+                    )
+                    seen_codes.add(code)
+            except (ValueError, TypeError, IndexError):
+                continue
+
+    courses_df = pd.DataFrame(courses)
+    if not student_info["총취득학점"] and not courses_df.empty:
+        student_info["총취득학점"] = int(courses_df["학점"].sum())
+
+    return student_info, basic_credits, courses_df
+
+
+def extract_transcript_tokens(file_path):
     try:
         with pdfplumber.open(file_path) as pdf:
             text = ""
@@ -31,112 +206,6 @@ def extract_transcript_tokens(file_path):
                 if page_text:
                     text += page_text + "\n"
 
-            if not text.strip():
-                return student_info, basic_credits, pd.DataFrame(courses)
-
-            # 1. 학생 정보 추출 (정규식 기반)
-            # 예: "202111109 이주혁 남자 2002.06.02 IT대학 컴퓨터공학과"
-            student_match = re.search(
-                r'(\d{9})\s+([가-힣]+)\s+[남여]\w*\s+[\d\.]+\s+'
-                r'([A-Za-z가-힣\·\s]+(?:대학|학부)\s+[A-Za-z가-힣\·\s]+(?:학과|학부|전공))'
-                r'\s+[\d\.]+\s+(\d+)\s+(\d+)',
-                text
-            )
-            if student_match:
-                student_info["학번"] = student_match.group(1)
-                student_info["이름"] = student_match.group(2).strip()
-                dept = student_match.group(3).strip()
-                student_info["소속"] = dept
-                student_info["department"] = dept
-                student_info["총취득학점"] = student_match.group(5)
-            else:
-                # 보조 매칭: 학번 9자리
-                id_match = re.search(r'20\d{7}', text)
-                if id_match:
-                    student_info["학번"] = id_match.group(0)
-
-                # 보조 매칭: 학과명 (feat/#31 + develop 패턴 병합)
-                dept_match = re.search(
-                    r'[A-Za-z가-힣\·\s]+대학\s+[A-Za-z가-힣\·\s]+(?:학과|학부|전공)', text
-                )
-                if dept_match:
-                    dept = dept_match.group(0).strip()
-                    student_info["소속"] = dept
-                    student_info["department"] = dept
-
-                # 보조 매칭: 총취득학점 (develop 패턴 — 더 넓은 커버리지)
-                earned_match = re.search(
-                    r'(?:총취득학점|취득학점\s*합계)\s*[:\s]*(\d+(?:\.\d)?)', text
-                )
-                if earned_match:
-                    try:
-                        student_info["총취득학점"] = int(float(earned_match.group(1)))
-                    except (ValueError, TypeError):
-                        pass
-                else:
-                    credits_match = re.search(
-                        r'20\d{7}.*?\s+(\d+)\s+(\d+)\s+\d+(?:\.\d+)?\s+\d+(?:\.\d+)?', text
-                    )
-                    if credits_match:
-                        student_info["총취득학점"] = credits_match.group(2)
-
-            # 2. 기본 이수 학점 표 파싱 (성적표 하단)
-            # 예: "기본이수학점 10 12 1 18 9 33 27 20 130"
-            basic_match = re.search(r'기본이수학점\s+([\d\s]+)', text)
-            if basic_match:
-                nums = basic_match.group(1).split()
-                cats = ["기초", "균형", "특화", "대교", "전필", "전선", "심화", "교직", "자선"]
-                for idx, cat in enumerate(cats):
-                    if idx < len(nums):
-                        basic_credits[cat] = nums[idx]
-
-            seen_codes = set()
-
-            # 이수구분 약어 → 정식 명칭 매핑
-            area_map = {
-                "기초": "기초교양", "균형": "균형교양", "특화": "특화교양", "대교": "대교",
-                "전필": "전공필수", "전선": "전공선택", "심화": "심화전공", "자선": "자유선택",
-                "일선": "일반선택", "교직": "교직", "학문": "학문기초"
-            }
-
-            # (영역) (과목코드 7자리) (과목명) [선택적 태그] (학점) (성적) (학기)
-            # 예: "기초 1100005 글쓰기와말하기(자연공학) 3.0 A+ 2021.1"
-            course_pattern = re.compile(
-                r'(기초|균형|특화|대교|전필|전선|심화|자선|일선|교직|학문)\s+'
-                r'(\d{7})\s+'
-                r'(.+?)\s+'
-                r'(?:[원재MD]\s+)*'
-                r'(\d(?:\.\d)?)\s+'
-                r'([A-D][+0]|F|P|NP|가|부)\s+'
-                r'(\d{4}[\.-][1-4][a-d]?)',
-                re.MULTILINE
-            )
-
-            lines = text.split('\n')
-            for line in lines:
-                for match in course_pattern.finditer(line):
-                    area_code = match.group(1)
-                    code = match.group(2)
-                    name = match.group(3).strip()
-                    credits_val = int(float(match.group(4)))
-                    grade = match.group(5)
-
-                    if len(name) > 30:
-                        continue
-
-                    full_area = area_map.get(area_code, area_code)
-
-                    if code not in seen_codes:
-                        courses.append({
-                            "과목코드": code,
-                            "교과목명": name,
-                            "학점": credits_val,
-                            "성적": grade,
-                            "이수구분": full_area,
-                        })
-                        seen_codes.add(code)
-
+        return _parse_transcript_text(text)
     except Exception:
-        pass
-
-    return student_info, basic_credits, pd.DataFrame(courses)
+        return _empty_student_info(), BASIC_CREDIT_DEFAULTS.copy(), pd.DataFrame([])
