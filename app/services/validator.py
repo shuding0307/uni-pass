@@ -9,6 +9,7 @@ from app.services.checkers import (
     RuleChecker,
     ValidationContext,
 )
+from app.services.rules import GraduationRuleSet
 
 
 class GraduationValidator:
@@ -37,8 +38,10 @@ class GraduationValidator:
         if self.transcript.admission_year < 2019:
             raise ValueError("이 시스템은 2019학번 이후 학생만 지원합니다.")
 
-        fail_grades = {"F", "NP", "U", "FA"}
-        passed_courses = [c for c in self.transcript.taken_courses if c.grade not in fail_grades]
+        passed_courses = [
+            c for c in self.transcript.taken_courses
+            if c.grade not in GraduationRuleSet.FAIL_GRADES
+        ]
         planned_courses = list(getattr(self.transcript, "planned_courses", []))
         major_codes = set(getattr(self.req, "major_course_codes", []))
 
@@ -67,12 +70,7 @@ class GraduationValidator:
             self.deficiency_map["총학점"] = self.req.total_credits - total_valid_credits
 
         planned_credits = sum(c.credits for c in planned_courses)
-        if planned_credits >= 22:
-            load_message = "⚠️ 과도한 학점입니다! 학습 부하가 매우 높을 것으로 예상됩니다."
-        elif planned_credits >= 19:
-            load_message = "조금 빡빡한 일정입니다. 건강 관리에 유의하세요!"
-        else:
-            load_message = "적절한 수강 계획입니다."
+        load_message = GraduationRuleSet.course_load_message(planned_credits)
 
         return {
             "is_graduatable": len(self.deficiency_map) == 0,
@@ -126,29 +124,7 @@ class GraduationValidator:
         return area
 
     def _normalize_area(self, area: str) -> str:
-        area_map = {
-            "기초": "기초교양",
-            "기교": "기초교양",
-            "교약": "기초교양",
-            "교필": "기초교양",
-            "균형": "균형교양",
-            "균교": "균형교양",
-            "학문": "학문기초",
-            "특화": "특화교양",
-            "전필": "전공필수",
-            "전선": "전공선택",
-            "심화": "심화전공",
-            "심전": "심화전공",
-            "자선": "자유선택",
-            "일선": "자유선택",
-            "일반선택": "자유선택",
-            "교직": "자유선택",
-            "진로": "자유선택",
-            "취업": "자유선택",
-            "창업": "자유선택",
-            "기타": "자유선택",
-        }
-        return area_map.get(area, area)
+        return GraduationRuleSet.normalize_area(area)
 
     def _general_education_requirements(self) -> dict:
         ge = self.req.general_education

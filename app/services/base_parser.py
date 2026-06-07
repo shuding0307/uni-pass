@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+from typing import Any, Iterable
+
 import pdfplumber
 
 
@@ -11,6 +13,26 @@ class BasePdfParser(ABC):
     def extract_text(self, path: str) -> str:
         with self.open_pdf(path) as pdf:
             return "\n".join(page.extract_text() or "" for page in pdf.pages)
+
+    def iter_pages(self, path: str) -> Iterable[Any]:
+        with self.open_pdf(path) as pdf:
+            yield from pdf.pages
+
+    def extract_tables(self, path: str) -> list:
+        tables = []
+        with self.open_pdf(path) as pdf:
+            for page in pdf.pages:
+                table = page.extract_table()
+                if table:
+                    tables.append(table)
+        return tables
+
+    def extract_words(self, path: str) -> list:
+        words = []
+        with self.open_pdf(path) as pdf:
+            for page in pdf.pages:
+                words.extend(page.extract_words())
+        return words
 
     @abstractmethod
     def parse(self, path: str, **kwargs):
