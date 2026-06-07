@@ -1,30 +1,12 @@
 import re
 
 import pandas as pd
-import pdfplumber
 
 from app.services.base_parser import BasePdfParser
+from app.services.rules import GraduationRuleSet
 
 
-AREA_MAP = {
-    "기초": "기초교양",
-    "기교": "기초교양",
-    "교약": "기초교양",
-    "교필": "기초교양",
-    "균형": "균형교양",
-    "균교": "균형교양",
-    "특화": "특화교양",
-    "특교": "특화교양",
-    "대교": "대교",
-    "전필": "전공필수",
-    "전선": "전공선택",
-    "심화": "심화전공",
-    "심전": "심화전공",
-    "자선": "자유선택",
-    "일선": "일반선택",
-    "교직": "교직",
-    "학문": "학문기초",
-}
+AREA_MAP = GraduationRuleSet.AREA_MAP
 
 AREA_PATTERN = "|".join(sorted(map(re.escape, AREA_MAP), key=len, reverse=True))
 
@@ -47,7 +29,11 @@ class TranscriptParser(BasePdfParser):
     """성적표 PDF에서 학생 정보, 기본이수학점, 과목 내역을 추출합니다."""
 
     def parse(self, path: str, **kwargs):
-        return extract_transcript_tokens(path)
+        try:
+            text = self.extract_text(path)
+            return _parse_transcript_text(text)
+        except Exception:
+            return _empty_student_info(), BASIC_CREDIT_DEFAULTS.copy(), pd.DataFrame([])
 
 
 def _empty_student_info():
@@ -182,7 +168,7 @@ def _parse_transcript_text(text):
                             "교과목명": name,
                             "학점": credits_val,
                             "성적": grade,
-                            "이수구분": AREA_MAP.get(area_code, area_code),
+                            "이수구분": GraduationRuleSet.normalize_area(area_code),
                             "이수구분원문": area_code,
                         }
                     )
@@ -198,14 +184,4 @@ def _parse_transcript_text(text):
 
 
 def extract_transcript_tokens(file_path):
-    try:
-        with pdfplumber.open(file_path) as pdf:
-            text = ""
-            for page in pdf.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-
-        return _parse_transcript_text(text)
-    except Exception:
-        return _empty_student_info(), BASIC_CREDIT_DEFAULTS.copy(), pd.DataFrame([])
+    return TranscriptParser().parse(file_path)
